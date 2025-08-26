@@ -11,7 +11,17 @@ import time
 
 warnings.filterwarnings("ignore")
 
-st.set_page_config(page_title="Enhanced Trading Signal Tool", layout="wide")
+st.set_page_config(
+    page_title="Enhanced Trading Signal Tool",
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': None
+    }
+)
 
 # Initialize session state
 if 'models_loaded' not in st.session_state:
