@@ -4,8 +4,4 @@ numpy
 scikit-learn
 joblib
 growwapi
-<<<<<<< HEAD
 groq
-=======
-groq
->>>>>>> 34152fa (commit)
