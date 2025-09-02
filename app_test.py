@@ -185,7 +185,7 @@ def compute_technical_indicators(df):
         
         # Volume indicators
         df['Volume_MA'] = df['volume'].rolling(20).mean()
-        df['Volume_Ratio'] = df['volume'] / (df['Volume_MA'] + 1)
+        df['Volume_Ratio'] = df['volume'] / (df['Volume_MA'].fillna(df['volume'].mean()) + 1)
         
         # **NEW: Calculate Buy_Score (same logic as training)**
         cond1 = (df["RSI"] < 45) & (df["Momentum"] > 0)
