@@ -55,48 +55,47 @@ class ModelTrainer:
     def feature_engineering(self):
         """Apply comprehensive feature engineering"""
         print("🔧 Applying feature engineering...")
-        
         try:
             # Technical indicators
             self.df["SMA_10"] = self.df["close"].rolling(10).mean()
             self.df["SMA_20"] = self.df["close"].rolling(20).mean()
             self.df["EMA_10"] = self.df["close"].ewm(span=10, adjust=False).mean()
             self.df["EMA_20"] = self.df["close"].ewm(span=20, adjust=False).mean()
-            
+
             # Price momentum and volatility
             self.df["Momentum"] = self.df["close"] - self.df["close"].shift(5)
             self.df["Momentum_10"] = self.df["close"] - self.df["close"].shift(10)
             self.df["Volatility"] = self.df["close"].rolling(10).std()
             self.df["Volatility_20"] = self.df["close"].rolling(20).std()
-            
+
             # RSI calculation
             self.df["RSI"] = self.compute_rsi(self.df["close"])
-            
+
             # MACD calculation
             self.df["MACD"], self.df["MACD_Signal"] = self.compute_macd(self.df["close"])
             self.df["MACD_Histogram"] = self.df["MACD"] - self.df["MACD_Signal"]
-            
+
             # Price position indicators
             self.df["Price_Above_SMA10"] = (self.df["close"] > self.df["SMA_10"]).astype(int)
             self.df["Price_Above_SMA20"] = (self.df["close"] > self.df["SMA_20"]).astype(int)
-            
+
             # Lagged features
             self.df["Lag_Close"] = self.df["close"].shift(1)
-            self.df["Lag_Volume"] = self.df["volume"].shift(1)
+            # REMOVED: self.df["Lag_Volume"] = self.df["volume"].shift(1)
             self.df["Lag_Momentum"] = self.df["Momentum"].shift(1)
             self.df["Lag_RSI"] = self.df["RSI"].shift(1)
-            
-            # Volume indicators
-            self.df["Volume_SMA"] = self.df["volume"].rolling(20).mean()
-            self.df["Volume_Ratio"] = self.df["volume"] / self.df["Volume_SMA"].replace(0, 1)
-            
+
+            # REMOVED: Volume indicators
+            # self.df["Volume_SMA"] = self.df["volume"].rolling(20).mean()
+            # self.df["Volume_Ratio"] = self.df["volume"] / self.df["Volume_SMA"].replace(0, 1)
+
             # Price patterns
             self.df["Higher_High"] = (self.df["high"] > self.df["high"].shift(1)).astype(int)
             self.df["Lower_Low"] = (self.df["low"] < self.df["low"].shift(1)).astype(int)
-            
+
             print(f"✅ Feature engineering completed. DataFrame shape: {self.df.shape}")
             return True
-            
+
         except Exception as e:
             print(f"❌ Error in feature engineering: {e}")
             return False

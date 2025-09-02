@@ -153,7 +153,7 @@ Your response:"""
         return "UNKNOWN"
 
 def compute_technical_indicators(df):
-    """Add comprehensive technical indicators including Buy_Score"""
+    """Add comprehensive technical indicators WITHOUT volume features"""
     try:
         df = df.copy()
         
@@ -183,18 +183,14 @@ def compute_technical_indicators(df):
         df['Lag_Close'] = df['close'].shift(1)
         df['Lag_Momentum'] = df['Momentum'].shift(1)
         
-        # Volume indicators
-        df['Volume_MA'] = df['volume'].rolling(20).mean()
-        df['Volume_Ratio'] = df['volume'] / (df['Volume_MA'].fillna(df['volume'].mean()) + 1)
-        
-        # **NEW: Calculate Buy_Score (same logic as training)**
+        # **NEW: Simplified Buy_Score WITHOUT Volume**
         cond1 = (df["RSI"] < 45) & (df["Momentum"] > 0)
-        cond2 = (df["close"] > df["SMA_10"]) & (df["Volume_Ratio"] > 1.1)
+        cond2 = (df["close"] > df["SMA_10"])  # Removed Volume_Ratio condition
         cond3 = (df["MACD"] > df["MACD_Signal"]) & ((df["MACD"] - df["MACD_Signal"]) > 0)
         cond4 = (df["Momentum"] > df["Momentum"].quantile(0.6)) & (df["RSI"] < 70)
         
-        # Weighted scoring (same as training)
-        df['Buy_Score'] = (cond1.astype(int) * 0.3) + (cond2.astype(int) * 0.2) + (cond3.astype(int) * 0.3) + (cond4.astype(int) * 0.2)
+        # Weighted scoring (adjusted weights since we removed volume condition)
+        df['Buy_Score'] = (cond1.astype(int) * 0.4) + (cond2.astype(int) * 0.2) + (cond3.astype(int) * 0.25) + (cond4.astype(int) * 0.15)
         
         # Fill NaN values
         df = df.fillna(method='ffill').fillna(method='bfill')
@@ -204,6 +200,7 @@ def compute_technical_indicators(df):
     except Exception as e:
         st.error(f"Error calculating technical indicators: {e}")
         return df
+
 
 def generate_ml_signal(df):
     """Generate ML-based trading signal with enhanced features"""
