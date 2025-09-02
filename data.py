@@ -20,10 +20,14 @@ def prepare_df(raw_data):
     df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
     
     # Convert price columns to numeric
-    for col in ['open', 'high', 'low', 'close', 'volume']:
+    for col in ['open', 'high', 'low', 'close']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     
+    # **FIXED: Handle volume - set to 1 if missing or NaN**
+    df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(1)
+    
     return df
+
 
 def initialize_groww_api(auth_token, instruments_path="instruments.csv"):
     """Initialize Groww API with instruments data"""

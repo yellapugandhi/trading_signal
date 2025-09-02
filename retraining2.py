@@ -117,36 +117,36 @@ class ModelTrainer:
         return macd, signal
     
     def create_targets(self):
-        """Create target variables for training with weighted scoring"""
+        """Create target variables for training with weighted scoring WITHOUT volume"""
         print("🎯 Creating target variables with weighted scoring...")
         
         try:
-            # **ENHANCED: Weighted scoring approach instead of simple OR logic**
+            # **FIXED: Remove Volume_Ratio reference completely**
             # Create multiple buy signal conditions and score them
             
-            # Condition 1: RSI oversold with positive momentum (Weight: 30%)
+            # Condition 1: RSI oversold with positive momentum (Weight: 35%)
             cond1 = (self.df["RSI"] < 45) & (self.df["Momentum"] > 0)
             
-            # Condition 2: Price above short-term moving average with good volume (Weight: 20%)
-            cond2 = (self.df["close"] > self.df["SMA_10"]) & (self.df["Volume_Ratio"] > 1.1)
+            # Condition 2: Price above short-term moving average (Weight: 25%) - REMOVED Volume_Ratio
+            cond2 = (self.df["close"] > self.df["SMA_10"])
             
-            # Condition 3: MACD bullish crossover (Weight: 30%)
+            # Condition 3: MACD bullish crossover (Weight: 25%)
             cond3 = (self.df["MACD"] > self.df["MACD_Signal"]) & (self.df["MACD_Histogram"] > 0)
             
-            # Condition 4: Price momentum with RSI not overbought (Weight: 20%)
+            # Condition 4: Price momentum with RSI not overbought (Weight: 15%)
             cond4 = (self.df["Momentum"] > self.df["Momentum"].quantile(0.6)) & (self.df["RSI"] < 70)
             
-            # **IMPROVED: Use weighted scoring instead of OR logic**
-            buy_score = (cond1.astype(int) * 0.3) + (cond2.astype(int) * 0.2) + (cond3.astype(int) * 0.3) + (cond4.astype(int) * 0.2)
+            # **UPDATED: Adjusted weights since we removed volume condition**
+            buy_score = (cond1.astype(int) * 0.35) + (cond2.astype(int) * 0.25) + (cond3.astype(int) * 0.25) + (cond4.astype(int) * 0.15)
             
-            # Convert to binary signal (threshold: 0.6 = 60% weighted score)
-            self.df["Buy_Signal"] = (buy_score > 0.6).astype(int)
+            # Convert to binary signal (threshold: 0.5 = 50% weighted score)
+            self.df["Buy_Signal"] = (buy_score > 0.5).astype(int)
             
             # **ADDITIONAL: Store the raw score for analysis**
             self.df["Buy_Score"] = buy_score
             
-            # **ENHANCED: More sophisticated risk-reward calculation**
-            # Use next 3-day high/low for more stable calculation
+            # **REST OF THE METHOD REMAINS THE SAME...**
+            # Enhanced risk-reward calculation
             future_returns = []
             for i in range(len(self.df)):
                 if i < len(self.df) - 3:
@@ -189,7 +189,7 @@ class ModelTrainer:
             self.df["Risk_Reward"] = self.df["Risk_Reward"].replace([np.inf, -np.inf], np.nan)
             self.df["Risk_Reward"] = self.df["Risk_Reward"].fillna(self.df["Risk_Reward"].median())
             
-            print(f"✅ Target variables created with weighted scoring")
+            print(f"✅ Target variables created with weighted scoring (NO VOLUME)")
             print(f"📊 Buy Signal distribution: \n{self.df['Buy_Signal'].value_counts()}")
             print(f"📊 Buy Signal percentage: {self.df['Buy_Signal'].mean()*100:.1f}%")
             print(f"📊 Average Buy Score: {self.df['Buy_Score'].mean():.3f}")
@@ -199,13 +199,13 @@ class ModelTrainer:
             buy_signal_pct = self.df['Buy_Signal'].mean() * 100
             if buy_signal_pct < 5:
                 print(f"⚠️ Warning: Only {buy_signal_pct:.1f}% buy signals. Lowering threshold...")
-                # Lower the threshold from 0.6 to 0.4 (40% weighted score)
-                self.df["Buy_Signal"] = (buy_score > 0.4).astype(int)
+                # Lower the threshold from 0.5 to 0.3 (30% weighted score)
+                self.df["Buy_Signal"] = (buy_score > 0.3).astype(int)
                 print(f"📊 Adjusted Buy Signal percentage: {self.df['Buy_Signal'].mean()*100:.1f}%")
             elif buy_signal_pct > 25:
                 print(f"⚠️ Warning: {buy_signal_pct:.1f}% buy signals (too many). Raising threshold...")
-                # Raise the threshold from 0.6 to 0.8 (80% weighted score)
-                self.df["Buy_Signal"] = (buy_score > 0.8).astype(int)
+                # Raise the threshold from 0.5 to 0.7 (70% weighted score)
+                self.df["Buy_Signal"] = (buy_score > 0.7).astype(int)
                 print(f"📊 Adjusted Buy Signal percentage: {self.df['Buy_Signal'].mean()*100:.1f}%")
             
             return True
@@ -215,6 +215,7 @@ class ModelTrainer:
             import traceback
             traceback.print_exc()
             return False
+
     
     def prepare_training_data(self):
         """Prepare features and targets for training"""
