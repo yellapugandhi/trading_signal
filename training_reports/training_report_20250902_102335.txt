@@ -1,0 +1,21 @@
+TRADING MODEL TRAINING REPORT
+================================
+Timestamp: 2025-09-02 10:23:35.721396
+Symbol: NIFTY
+Data points: 1699
+Date range: 2024-09-09 00:00:00+05:30 to 2025-09-02 10:15:00+05:30
+
+DATA STATISTICS:
+- Buy signals: 1047 (61.6%)
+- Average risk-reward: 0.459
+- Price range: ₹22082.65 - ₹26216.05
+
+BUY SIGNAL MODEL:
+- Model type: Random Forest Classifier
+- Test accuracy: 0.8735
+- ROC AUC: 0.9554
+
+RISK-REWARD MODEL:
+- Model type: Random Forest Regressor
+- Test MSE: 0.0596
+
