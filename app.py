@@ -11,7 +11,17 @@ import time
 
 warnings.filterwarnings("ignore")
 
-st.set_page_config(page_title="Enhanced Trading Signal Tool", layout="wide")
+st.set_page_config(
+    page_title="Enhanced Trading Signal Tool",
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': None
+    }
+)
 
 # Initialize session state
 if 'models_loaded' not in st.session_state:
@@ -205,52 +215,62 @@ def calculate_position_size(current_price, stop_loss, account_balance, risk_per_
     except:
         return 0
 
+def calculate_risk_reward(entry_price, stop_loss, tp, account_balance, risk_per_trade):
+    # Price-based R:R
+    price_risk = abs(entry_price - stop_loss)
+    price_reward = abs(tp - entry_price)
+    rr_price_based = round(price_reward / price_risk, 2) if price_risk > 0 else 0
+
+    # Account-based R:R
+    risk_amount = account_balance * (risk_per_trade / 100)
+    quantity = int(risk_amount / price_risk) if price_risk > 0 else 0
+    max_loss = price_risk * quantity
+    max_profit = price_reward * quantity
+    rr_account_based = round(max_profit / risk_amount, 2) if risk_amount > 0 else 0
+
+    return {
+        "rr_price_based": rr_price_based,
+        "rr_account_based": rr_account_based,
+        "quantity": quantity,
+        "max_loss": max_loss,
+        "max_profit": max_profit
+    }
+
 def calculate_risk_levels(df, action, current_price):
-    """Calculate stop loss and take profit levels"""
-    try:
-        # Calculate ATR for volatility-based stops
-        df['TR'] = np.maximum(
-            df['high'] - df['low'],
-            np.maximum(
-                abs(df['high'] - df['close'].shift(1)),
-                abs(df['low'] - df['close'].shift(1))
-            )
-        )
-        atr = df['TR'].rolling(14).mean().iloc[-1]
-        
-        if pd.isna(atr) or atr == 0:
-            atr = current_price * 0.02  # 2% as fallback
-        
-        if action == "BUY":
-            stop_loss = round(current_price - (1.5 * atr), 2)
-            tp1 = round(current_price + (1.5 * atr), 2)
-            tp2 = round(current_price + (3 * atr), 2)
-        else:  # SELL
-            stop_loss = round(current_price + (1.5 * atr), 2)
-            tp1 = round(current_price - (1.5 * atr), 2)
-            tp2 = round(current_price - (3 * atr), 2)
-        
-        risk_amount = abs(current_price - stop_loss)
-        reward_amount = abs(tp2 - current_price)
-        rr_ratio = round(reward_amount / risk_amount, 2) if risk_amount > 0 else 0
-        
-        return {
-            'stop_loss': stop_loss,
-            'take_profit_1': tp1,
-            'take_profit_2': tp2,
-            'risk_reward_ratio': rr_ratio,
-            'atr': round(atr, 2)
-        }
-        
-    except Exception as e:
-        st.error(f"Error calculating risk levels: {e}")
-        return {
-            'stop_loss': current_price * 0.95 if action == "BUY" else current_price * 1.05,
-            'take_profit_1': current_price * 1.02,
-            'take_profit_2': current_price * 1.05,
-            'risk_reward_ratio': 1.0,
-            'atr': current_price * 0.01
-        }
+    """
+    Calculate stop loss, take profit levels, and risk/reward ratio based on action and price.
+    """
+    latest = df.iloc[-1]
+    atr = df['Volatility'].iloc[-1] if 'Volatility' in df.columns else 1.0
+    atr = max(atr, 1.0)
+    buffer = atr * 1.2
+
+    if action == "BUY":
+        stop_loss = round(current_price - buffer, 2)
+        take_profit_1 = round(current_price + buffer * 1.5, 2)
+        take_profit_2 = round(current_price + buffer * 2.5, 2)
+    elif action == "SELL":
+        stop_loss = round(current_price + buffer, 2)
+        take_profit_1 = round(current_price - buffer * 1.5, 2)
+        take_profit_2 = round(current_price - buffer * 2.5, 2)
+    else:
+        stop_loss = round(current_price - buffer, 2)
+        take_profit_1 = round(current_price + buffer, 2)
+        take_profit_2 = round(current_price + buffer * 2, 2)
+
+    price_risk = abs(current_price - stop_loss)
+    price_reward = abs(take_profit_2 - current_price)
+    risk_reward_ratio = round(price_reward / price_risk, 2) if price_risk > 0 else 1.0
+
+    return {
+        "stop_loss": stop_loss,
+        "take_profit_1": take_profit_1,
+        "take_profit_2": take_profit_2,
+        "risk_reward_ratio": risk_reward_ratio,
+        "atr": atr
+    }
+
+
 
 def generate_ml_signal(df):
     """Generate ML-based trading signal"""

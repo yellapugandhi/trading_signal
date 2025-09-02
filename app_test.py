@@ -32,6 +32,7 @@ if 'models_loaded' not in st.session_state:
     st.session_state.analysis_data = None
     st.session_state.auto_refresh = False
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_models_safely():
     """Safely load models with error handling"""
     try:
@@ -152,7 +153,7 @@ Your response:"""
         return "UNKNOWN"
 
 def compute_technical_indicators(df):
-    """Add comprehensive technical indicators"""
+    """Add comprehensive technical indicators including Buy_Score"""
     try:
         df = df.copy()
         
@@ -186,6 +187,15 @@ def compute_technical_indicators(df):
         df['Volume_MA'] = df['volume'].rolling(20).mean()
         df['Volume_Ratio'] = df['volume'] / (df['Volume_MA'] + 1)
         
+        # **NEW: Calculate Buy_Score (same logic as training)**
+        cond1 = (df["RSI"] < 45) & (df["Momentum"] > 0)
+        cond2 = (df["close"] > df["SMA_10"]) & (df["Volume_Ratio"] > 1.1)
+        cond3 = (df["MACD"] > df["MACD_Signal"]) & ((df["MACD"] - df["MACD_Signal"]) > 0)
+        cond4 = (df["Momentum"] > df["Momentum"].quantile(0.6)) & (df["RSI"] < 70)
+        
+        # Weighted scoring (same as training)
+        df['Buy_Score'] = (cond1.astype(int) * 0.3) + (cond2.astype(int) * 0.2) + (cond3.astype(int) * 0.3) + (cond4.astype(int) * 0.2)
+        
         # Fill NaN values
         df = df.fillna(method='ffill').fillna(method='bfill')
         
@@ -195,108 +205,45 @@ def compute_technical_indicators(df):
         st.error(f"Error calculating technical indicators: {e}")
         return df
 
-def calculate_position_size(current_price, stop_loss, account_balance, risk_per_trade):
-    """Calculate optimal position size"""
-    try:
-        if stop_loss == 0 or current_price == stop_loss:
-            return 0
-        
-        risk_amount = account_balance * (risk_per_trade / 100)
-        price_risk = abs(current_price - stop_loss)
-        
-        if price_risk == 0:
-            return 0
-        
-        position_size = int(risk_amount / price_risk)
-        max_shares_by_value = int((account_balance * 0.10) / current_price)  # Max 10% of account
-        
-        return min(position_size, max_shares_by_value, 1000)  # Cap at 1000 shares
-        
-    except:
-        return 0
-
-def calculate_risk_reward(entry_price, stop_loss, tp, account_balance, risk_per_trade):
-    # Price-based R:R
-    price_risk = abs(entry_price - stop_loss)
-    price_reward = abs(tp - entry_price)
-    rr_price_based = round(price_reward / price_risk, 2) if price_risk > 0 else 0
-
-    # Account-based R:R
-    risk_amount = account_balance * (risk_per_trade / 100)
-    quantity = int(risk_amount / price_risk) if price_risk > 0 else 0
-    max_loss = price_risk * quantity
-    max_profit = price_reward * quantity
-    rr_account_based = round(max_profit / risk_amount, 2) if risk_amount > 0 else 0
-
-    return {
-        "rr_price_based": rr_price_based,
-        "rr_account_based": rr_account_based,
-        "quantity": quantity,
-        "max_loss": max_loss,
-        "max_profit": max_profit
-    }
-
-def calculate_risk_levels(df, action, current_price):
-    """
-    Calculate stop loss, take profit levels, and risk/reward ratio based on action and price.
-    """
-    latest = df.iloc[-1]
-    atr = df['Volatility'].iloc[-1] if 'Volatility' in df.columns else 1.0
-    atr = max(atr, 1.0)
-    buffer = atr * 1.2
-
-    if action == "BUY":
-        stop_loss = round(current_price - buffer, 2)
-        take_profit_1 = round(current_price + buffer * 1.5, 2)
-        take_profit_2 = round(current_price + buffer * 2.5, 2)
-    elif action == "SELL":
-        stop_loss = round(current_price + buffer, 2)
-        take_profit_1 = round(current_price - buffer * 1.5, 2)
-        take_profit_2 = round(current_price - buffer * 2.5, 2)
-    else:
-        stop_loss = round(current_price - buffer, 2)
-        take_profit_1 = round(current_price + buffer, 2)
-        take_profit_2 = round(current_price + buffer * 2, 2)
-
-    price_risk = abs(current_price - stop_loss)
-    price_reward = abs(take_profit_2 - current_price)
-    risk_reward_ratio = round(price_reward / price_risk, 2) if price_risk > 0 else 1.0
-
-    return {
-        "stop_loss": stop_loss,
-        "take_profit_1": take_profit_1,
-        "take_profit_2": take_profit_2,
-        "risk_reward_ratio": risk_reward_ratio,
-        "atr": atr
-    }
-
-
-
 def generate_ml_signal(df):
-    """Generate ML-based trading signal"""
+    """Generate ML-based trading signal with enhanced features"""
     try:
         if not st.session_state.models_loaded:
+            st.info("🔄 Models not loaded. Using simple signal generation.")
             return simple_signal_generation(df)
         
-        # Prepare features
-        features = ["SMA_10", "EMA_10", "RSI", "Momentum", "Volatility",
-                   "Lag_Close", "Lag_Momentum", "MACD", "MACD_Signal"]
+        # **UPDATED: Include Buy_Score in features**
+        all_features = ["SMA_10", "EMA_10", "RSI", "Momentum", "Volatility", 
+                       "Lag_Close", "Lag_Momentum", "MACD", "MACD_Signal", "Buy_Score"]
+        core_features = ["SMA_10", "EMA_10", "RSI", "Momentum", "Volatility", 
+                        "MACD", "MACD_Signal"]  # Minimum required
         
-        # Check if all features are available
-        missing_features = [f for f in features if f not in df.columns]
-        if missing_features:
-            st.warning(f"Missing features: {missing_features}. Using simple signals.")
+        available_features = [f for f in all_features if f in df.columns]
+        core_available = [f for f in core_features if f in df.columns]
+        
+        # Check if we have minimum required features
+        if len(core_available) < 5:
+            st.warning("⚠️ Insufficient technical indicators. Using simple signals.")
             return simple_signal_generation(df)
         
-        latest_features = df[features].iloc[-1:].fillna(0)
+        # Use available features
+        latest_features = df[available_features].iloc[-1:].fillna(0)
         
         # Get ML predictions
         buy_proba = st.session_state.buy_model.predict_proba(latest_features)[0]
-        rr_prediction = st.session_state.rr_model.predict(latest_features)  # FIXED: Added 
+        rr_prediction = st.session_state.rr_model.predict(latest_features)
         
         confidence = buy_proba[1] * 100
         
-        # Determine action based on confidence
+        # **ENHANCED: Adjust confidence based on Buy_Score if available**
+        buy_score = None
+        if 'Buy_Score' in available_features:
+            buy_score = latest_features['Buy_Score'].iloc[0]
+            # Boost/reduce confidence based on buy score
+            score_boost = (buy_score - 0.5) * 20  # Boost up to ±10%
+            confidence = max(min(confidence + score_boost, 95), 5)
+        
+        # Determine action
         if confidence >= 65:
             action = "BUY"
         elif confidence <= 35:
@@ -308,8 +255,9 @@ def generate_ml_signal(df):
             'action': action,
             'confidence': confidence,
             'buy_probability': buy_proba[1],
-            'predicted_rr': max(rr_prediction, 0.01),
-            'method': 'ML Model'
+            'predicted_rr': max(rr_prediction[0], 0.01),
+            'method': f'ML Model ({len(available_features)} features)',
+            'buy_score': buy_score
         }
         
     except Exception as e:
@@ -325,31 +273,36 @@ def simple_signal_generation(df):
         momentum = latest.get('Momentum', 0)
         price = latest.get('close', 0)
         sma_10 = latest.get('SMA_10', price)
+        buy_score = latest.get('Buy_Score', 0.5)
         
-        # Simple scoring
-        buy_score = 0
+        # Simple scoring with Buy_Score integration
+        base_score = 0
         sell_score = 0
         
         if rsi < 30:
-            buy_score += 3
+            base_score += 3
         elif rsi > 70:
             sell_score += 3
         elif rsi < 45:
-            buy_score += 1
+            base_score += 1
         
         if momentum > 0:
-            buy_score += 2
+            base_score += 2
         else:
             sell_score += 1
         
         if price > sma_10:
-            buy_score += 1
+            base_score += 1
         else:
             sell_score += 1
         
-        if buy_score >= 4:
+        # Integrate Buy_Score
+        score_boost = buy_score * 3  # Up to 3 extra points
+        final_buy_score = base_score + score_boost
+        
+        if final_buy_score >= 4:
             action = "BUY"
-            confidence = min(buy_score * 15, 85)
+            confidence = min(final_buy_score * 12, 85)
         elif sell_score >= 3:
             action = "SELL"
             confidence = min(sell_score * 20, 85)
@@ -362,7 +315,8 @@ def simple_signal_generation(df):
             'confidence': confidence,
             'buy_probability': confidence / 100,
             'predicted_rr': 1.5,
-            'method': 'Simple Rules'
+            'method': 'Simple Rules',
+            'buy_score': buy_score
         }
         
     except Exception as e:
@@ -371,7 +325,8 @@ def simple_signal_generation(df):
             'confidence': 0,
             'buy_probability': 0.5,
             'predicted_rr': 1.0,
-            'method': 'Error Fallback'
+            'method': 'Error Fallback',
+            'buy_score': 0
         }
 
 def combine_ml_and_groq_signals(ml_signal, groq_signal):
@@ -404,7 +359,60 @@ def combine_ml_and_groq_signals(ml_signal, groq_signal):
         'ml_signal': base_action,
         'groq_signal': groq_signal,
         'agreement': base_action == groq_signal,
-        'original_confidence': base_confidence
+        'original_confidence': base_confidence,
+        'buy_score': ml_signal.get('buy_score', 0)
+    }
+
+def calculate_position_size(current_price, stop_loss, account_balance, risk_per_trade):
+    """Calculate optimal position size"""
+    try:
+        if stop_loss == 0 or current_price == stop_loss:
+            return 0
+        
+        risk_amount = account_balance * (risk_per_trade / 100)
+        price_risk = abs(current_price - stop_loss)
+        
+        if price_risk == 0:
+            return 0
+        
+        position_size = int(risk_amount / price_risk)
+        max_shares_by_value = int((account_balance * 0.10) / current_price)  # Max 10% of account
+        
+        return min(position_size, max_shares_by_value, 1000)  # Cap at 1000 shares
+        
+    except:
+        return 0
+
+def calculate_risk_levels(df, action, current_price):
+    """Calculate stop loss, take profit levels, and risk/reward ratio"""
+    latest = df.iloc[-1]
+    atr = df['Volatility'].iloc[-1] if 'Volatility' in df.columns else 1.0
+    atr = max(atr, 1.0)
+    buffer = atr * 1.2
+
+    if action == "BUY":
+        stop_loss = round(current_price - buffer, 2)
+        take_profit_1 = round(current_price + buffer * 1.5, 2)
+        take_profit_2 = round(current_price + buffer * 2.5, 2)
+    elif action == "SELL":
+        stop_loss = round(current_price + buffer, 2)
+        take_profit_1 = round(current_price - buffer * 1.5, 2)
+        take_profit_2 = round(current_price - buffer * 2.5, 2)
+    else:
+        stop_loss = round(current_price - buffer, 2)
+        take_profit_1 = round(current_price + buffer, 2)
+        take_profit_2 = round(current_price + buffer * 2, 2)
+
+    price_risk = abs(current_price - stop_loss)
+    price_reward = abs(take_profit_2 - current_price)
+    risk_reward_ratio = round(price_reward / price_risk, 2) if price_risk > 0 else 1.0
+
+    return {
+        "stop_loss": stop_loss,
+        "take_profit_1": take_profit_1,
+        "take_profit_2": take_profit_2,
+        "risk_reward_ratio": risk_reward_ratio,
+        "atr": atr
     }
 
 def fetch_latest_candle(groww, symbol, interval_minutes=10, max_candles=50):
@@ -469,13 +477,13 @@ def fetch_latest_candle(groww, symbol, interval_minutes=10, max_candles=50):
         df = df.dropna(how='all')
         df = df.fillna(method='ffill').fillna(method='bfill')
         
-        # Add technical indicators
+        # Add technical indicators (including Buy_Score)
         df = compute_technical_indicators(df)
         
         return df
         
     except Exception as e:
-        st.error(f"Error fetching data: {str(e)}")
+        st.error(f"Error fetching  {str(e)}")
         return None
 
 def perform_complete_analysis(groww, selected_symbol, interval_minutes, groq_key, selected_groq_model, account_balance, risk_per_trade, groq_available):
@@ -527,8 +535,7 @@ def perform_complete_analysis(groww, selected_symbol, interval_minutes, groq_key
         return None, f"Analysis failed: {str(e)}"
 
 def display_analysis_results(analysis_data):
-    """Display complete analysis results"""
-    
+    """Display complete analysis results with Buy_Score"""
     df = analysis_data['df']
     ml_signal = analysis_data['ml_signal']
     groq_signal = analysis_data['groq_signal']
@@ -570,7 +577,36 @@ def display_analysis_results(analysis_data):
         st.markdown(f"<div style='text-align:center;'>Confidence: <b>{final_signal['confidence']:.1f}%</b></div>", unsafe_allow_html=True)
         st.markdown(f"<div style='text-align:center;'>{final_signal.get('consensus', 'Single Source')}</div>", unsafe_allow_html=True)
     
-    # Detailed Analysis
+    # **NEW: Technical Analysis with Buy_Score**
+    st.markdown("### 📊 Technical Analysis")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    latest = df.iloc[-1]
+    
+    with col1:
+        current_rsi = latest.get('RSI', 0)
+        st.metric("RSI", f"{current_rsi:.1f}")
+    
+    with col2:
+        current_momentum = latest.get('Momentum', 0)
+        st.metric("Momentum", f"{current_momentum:.2f}")
+    
+    with col3:
+        current_macd = latest.get('MACD', 0)
+        st.metric("MACD", f"{current_macd:.4f}")
+    
+    with col4:
+        current_volume_ratio = latest.get('Volume_Ratio', 1)
+        st.metric("Volume Ratio", f"{current_volume_ratio:.2f}x")
+    
+    with col5:
+        # **NEW: Display Buy_Score**
+        current_buy_score = latest.get('Buy_Score', 0)
+        score_color = "🟢" if current_buy_score > 0.6 else ("🟡" if current_buy_score > 0.4 else "🔴")
+        st.metric("Buy Score", f"{score_color} {current_buy_score:.2f}")
+    
+    # Trade Analysis (existing code continues...)
     if final_signal['action'] in ["BUY", "SELL"]:
         investment_amount = current_price * quantity
         
@@ -598,48 +634,8 @@ def display_analysis_results(analysis_data):
             max_loss = abs(current_price - risk_levels['stop_loss']) * quantity
             expected_profit = (max_profit * 0.6) - (max_loss * 0.4)  # 60% win rate assumption
             st.metric("📊 Expected Profit", f"₹{expected_profit:,.0f}")
-        
-        # Profit projections
-        st.markdown("### 💎 Profit Projections")
-        profit_col1, profit_col2, profit_col3 = st.columns(3)
-        
-        with profit_col1:
-            st.markdown("#### 🟢 Best Case")
-            st.markdown(f"**₹{max_profit:,.0f}**")
-            st.markdown("If TP2 hit")
-        
-        with profit_col2:
-            st.markdown("#### 🔴 Worst Case")
-            st.markdown(f"**-₹{max_loss:,.0f}**")
-            st.markdown("If stop loss hit")
-        
-        with profit_col3:
-            st.markdown("#### 📊 Expected")
-            st.markdown(f"**₹{expected_profit:,.0f}**")
-            st.markdown("60% win rate")
     
-    # Technical Analysis
-    st.markdown("### 🔧 Technical Analysis")
-    tech_col1, tech_col2, tech_col3 = st.columns(3)
-    
-    latest = df.iloc[-1]
-    
-    with tech_col1:
-        st.write(f"**RSI:** {latest['RSI']:.1f}")
-        st.write(f"**MACD:** {latest['MACD']:.4f}")
-        st.write(f"**Signal:** {latest['MACD_Signal']:.4f}")
-    
-    with tech_col2:
-        st.write(f"**SMA 10:** ₹{latest['SMA_10']:.2f}")
-        st.write(f"**EMA 10:** ₹{latest['EMA_10']:.2f}")
-        st.write(f"**Momentum:** {latest['Momentum']:.2f}")
-    
-    with tech_col3:
-        st.write(f"**Volatility:** {latest['Volatility']:.2f}")
-        st.write(f"**Volume Ratio:** {latest['Volume_Ratio']:.2f}x")
-        st.write(f"**ATR:** {risk_levels.get('atr', 0):.2f}")
-    
-    # Agreement Analysis
+    # Agreement Analysis (if Groq available)
     if groq_signal != "UNKNOWN":
         st.markdown("### 🤝 Signal Agreement Analysis")
         agreement_col1, agreement_col2 = st.columns(2)
@@ -657,16 +653,50 @@ def display_analysis_results(analysis_data):
     
     # Recent market data
     st.markdown("### 📋 Recent Market Data")
-    display_df = df.tail(10)[['timestamp', 'close', 'open', 'high', 'low', 'volume', 'RSI']].copy()
+    display_df = df.tail(10)[['timestamp', 'close', 'open', 'high', 'low', 'volume', 'RSI', 'Buy_Score']].copy()
     display_df['timestamp'] = display_df['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
-    display_df = display_df.round(2)
+    display_df = display_df.round(3)
     st.dataframe(display_df, use_container_width=True)
 
 # Main App Layout
 st.title("🚀 Enhanced Trading Signal Tool")
-st.markdown("### ML Model + Groq LLM Analysis with Complete Risk Management")
+st.markdown("### ML Model + Groq LLM Analysis with Weighted Buy Score")
 
-# Sidebar
+# **NEW: Model Information in Sidebar**
+with st.sidebar:
+    st.markdown("### 🤖 Model Information")
+    
+    if not st.session_state.models_loaded:
+        success, message = load_models_safely()
+        if success:
+            st.success("✅ Models Loaded")
+        else:
+            st.error("❌ Models Not Loaded")
+            if st.button("🔄 Reload Models"):
+                success, message = load_models_safely()
+                if success:
+                    st.rerun()
+    else:
+        st.success("✅ Models Loaded")
+        
+        # Try to show feature importance
+        try:
+            if hasattr(st.session_state.buy_model, 'feature_importances_'):
+                st.markdown("**Top Features:**")
+                features = ["SMA_10", "EMA_10", "RSI", "Momentum", "Volatility", 
+                           "Lag_Close", "Lag_Momentum", "MACD", "MACD_Signal", "Buy_Score"]
+                importances = st.session_state.buy_model.feature_importances_
+                
+                # Show top 5 features
+                feature_importance = list(zip(features[:len(importances)], importances))
+                feature_importance.sort(key=lambda x: x[1], reverse=True)
+                
+                for feat, imp in feature_importance[:5]:
+                    st.text(f"{feat}: {imp:.3f}")
+        except:
+            pass
+
+# Sidebar Authentication
 st.sidebar.title("🔐 API Authentication")
 grow_key = st.sidebar.text_input("Groww API token", type="password", key="grow_api_key")
 groq_key = st.sidebar.text_input("Groq API key (optional)", type="password", key="groq_api_key")
@@ -675,15 +705,6 @@ groq_key = st.sidebar.text_input("Groq API key (optional)", type="password", key
 if not grow_key:
     st.warning("Please enter your Groww API token in the sidebar.")
     st.stop()
-
-# Load models
-if not st.session_state.models_loaded:
-    with st.spinner("Loading ML models..."):
-        success, message = load_models_safely()
-        if success:
-            st.success("✅ " + message)
-        else:
-            st.warning("⚠️ " + message)
 
 # Initialize Groww API
 with st.spinner("Initializing Groww API..."):
@@ -746,7 +767,7 @@ with button_col2:
     refresh_clicked = st.button("🔄 Refresh Data", use_container_width=True)
 
 with button_col3:
-    if st.session_state.analysis_data:  # FIXED: Changed from analysis_ to analysis_data
+    if st.session_state.analysis_:
         quick_refresh = st.button("⚡ Quick Update", use_container_width=True)
     else:
         quick_refresh = False
@@ -758,7 +779,7 @@ with button_col4:
         st.rerun()
 
 # Auto-refresh logic
-if st.session_state.auto_refresh and st.session_state.analysis_data:  # FIXED: Changed from analysis_
+if st.session_state.auto_refresh and st.session_state.analysis_:
     last_refresh = st.session_state.last_refresh
     if last_refresh and (datetime.now() - last_refresh).seconds >= refresh_seconds:
         refresh_clicked = True
@@ -790,7 +811,7 @@ if analyze_clicked or refresh_clicked or quick_refresh:
             st.error(f"❌ {message}")
 
 # Display results if available
-if st.session_state.analysis_data:  # FIXED: Changed from analysis_
+if st.session_state.analysis_:
     display_analysis_results(st.session_state.analysis_data)
     
     # Action buttons
@@ -820,6 +841,7 @@ if st.session_state.analysis_data:  # FIXED: Changed from analysis_
                     'groq_action': groq_signal,
                     'final_action': final_signal['action'],
                     'confidence': final_signal['confidence'],
+                    'buy_score': final_signal.get('buy_score', 0),
                     'price': current_price,
                     'quantity': quantity if final_signal['action'] in ["BUY", "SELL"] else 0,
                     'stop_loss': risk_levels['stop_loss'] if final_signal['action'] in ["BUY", "SELL"] else 0,
@@ -836,7 +858,7 @@ if st.session_state.analysis_data:  # FIXED: Changed from analysis_
                 st.rerun()
 
 # Auto-refresh display
-if st.session_state.auto_refresh and st.session_state.analysis_data:  # FIXED: Changed from analysis_
+if st.session_state.auto_refresh and st.session_state.analysis_:
     st.info(f"🔄 Auto-refresh enabled - updating every {refresh_interval}")
     if st.button("⏹️ Stop Auto-refresh"):
         st.session_state.auto_refresh = False
@@ -864,6 +886,11 @@ with st.expander("📖 How to Use This Tool"):
     - **70-85%**: Strong Signal  
     - **50-70%**: Moderate Signal
     - **Below 50%**: Weak Signal
+    
+    **Buy Score**:
+    - **0.8+**: 🟢 Very Strong Buy Conditions
+    - **0.6-0.8**: 🟡 Moderate Buy Conditions
+    - **Below 0.6**: 🔴 Weak Buy Conditions
     
     **Agreement Status**:
     - **AGREEMENT**: ML and Groq both suggest same action
