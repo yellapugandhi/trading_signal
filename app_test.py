@@ -577,7 +577,7 @@ def display_analysis_results(analysis_data):
     # **NEW: Technical Analysis with Buy_Score**
     st.markdown("### 📊 Technical Analysis")
     
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
     
     latest = df.iloc[-1]
     
@@ -594,10 +594,6 @@ def display_analysis_results(analysis_data):
         st.metric("MACD", f"{current_macd:.4f}")
     
     with col4:
-        current_volume_ratio = latest.get('Volume_Ratio', 1)
-        st.metric("Volume Ratio", f"{current_volume_ratio:.2f}x")
-    
-    with col5:
         # **NEW: Display Buy_Score**
         current_buy_score = latest.get('Buy_Score', 0)
         score_color = "🟢" if current_buy_score > 0.6 else ("🟡" if current_buy_score > 0.4 else "🔴")
