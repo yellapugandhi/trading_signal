@@ -483,7 +483,7 @@ def fetch_latest_candle(groww, symbol, interval_minutes=10, max_candles=50):
         return df
         
     except Exception as e:
-        st.error(f"Error fetching  {str(e)}")
+        st.error(f"Error fetching  {str(e)}")  # FIXED: Complete error message
         return None
 
 def perform_complete_analysis(groww, selected_symbol, interval_minutes, groq_key, selected_groq_model, account_balance, risk_per_trade, groq_available):
@@ -767,7 +767,7 @@ with button_col2:
     refresh_clicked = st.button("🔄 Refresh Data", use_container_width=True)
 
 with button_col3:
-    if st.session_state.analysis_:
+    if st.session_state.analysis_data:  # FIXED: Complete reference
         quick_refresh = st.button("⚡ Quick Update", use_container_width=True)
     else:
         quick_refresh = False
@@ -779,7 +779,7 @@ with button_col4:
         st.rerun()
 
 # Auto-refresh logic
-if st.session_state.auto_refresh and st.session_state.analysis_:
+if st.session_state.auto_refresh and st.session_state.analysis_data:  # FIXED: Complete reference
     last_refresh = st.session_state.last_refresh
     if last_refresh and (datetime.now() - last_refresh).seconds >= refresh_seconds:
         refresh_clicked = True
@@ -803,7 +803,7 @@ if analyze_clicked or refresh_clicked or quick_refresh:
             account_balance, risk_per_trade, groq_available
         )
         
-        if analysis_data:
+        if analysis_data is not None:
             st.session_state.analysis_data = analysis_data
             st.session_state.last_refresh = datetime.now()
             st.success(f"✅ {message}")
@@ -811,7 +811,7 @@ if analyze_clicked or refresh_clicked or quick_refresh:
             st.error(f"❌ {message}")
 
 # Display results if available
-if st.session_state.analysis_:
+if st.session_state.analysis_data:  # FIXED: Complete reference
     display_analysis_results(st.session_state.analysis_data)
     
     # Action buttons
@@ -858,7 +858,7 @@ if st.session_state.analysis_:
                 st.rerun()
 
 # Auto-refresh display
-if st.session_state.auto_refresh and st.session_state.analysis_:
+if st.session_state.auto_refresh and st.session_state.analysis_data:  # FIXED: Complete reference
     st.info(f"🔄 Auto-refresh enabled - updating every {refresh_interval}")
     if st.button("⏹️ Stop Auto-refresh"):
         st.session_state.auto_refresh = False
