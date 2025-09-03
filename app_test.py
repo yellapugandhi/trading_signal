@@ -87,13 +87,14 @@ def initialize_groww_safely():
         return None, None, f"Error initializing Groww API: {str(e)}"
 
 def get_groq_models(groq_key):
-    """Get available Groq models"""
+    """Return single preferred Groq model"""
     try:
         import groq
         from groq import Groq
+        # Test connection with a simple API call
         client = Groq(api_key=groq_key)
-        models = client.models.list()
-        return [m.id for m in models.data], None
+        # Just return your preferred model without API call
+        return ["llama3-70b-8192"], None  # Your preferred model
     except ImportError:
         return [], "Groq Python lib not installed! Install: pip install groq"
     except Exception as e:
@@ -692,7 +693,7 @@ with st.sidebar:
 # Sidebar Authentication
 st.sidebar.title("🔐 API Authentication")
 grow_key = st.sidebar.text_input("Groww API token", type="password", key="grow_api_key")
-groq_key = st.sidebar.text_input("Groq API key (optional)", type="password", key="groq_api_key")
+groq_key = st.sidebar.text_input("Groq API key", type="password", key="groq_api_key")
 
 # System initialization
 if not grow_key:
