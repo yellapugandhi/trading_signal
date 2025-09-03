@@ -94,7 +94,7 @@ def get_groq_models(groq_key):
         # Test connection with a simple API call
         client = Groq(api_key=groq_key)
         # Just return your preferred model without API call
-        return ["llama3-70b-8192"], None  # Your preferred model
+        return ["llama-3.3-70b-versatile"], None  # Your preferred model
     except ImportError:
         return [], "Groq Python lib not installed! Install: pip install groq"
     except Exception as e:
