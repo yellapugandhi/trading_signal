@@ -899,7 +899,7 @@ def calculate_position_size(current_price, stop_loss, account_balance, risk_per_
         return 0
 
 def calculate_risk_levels(df, action, current_price):
-    """🆕 Enhanced risk level calculation with support/resistance awareness"""
+    """🆕 Enhanced risk level calculation with support/resistance awareness - FIXED"""
     latest = df.iloc[-1]
     atr = df['Volatility'].iloc[-1] if 'Volatility' in df.columns else 1.0
     atr = max(atr, 1.0)
@@ -914,11 +914,14 @@ def calculate_risk_levels(df, action, current_price):
         stop_loss = max(support_level * 0.98, current_price - buffer)  # 2% below support
         take_profit_1 = min(resistance_level * 0.98, current_price + buffer * 1.5)
         take_profit_2 = min(resistance_level, current_price + buffer * 2.5)
+        
     elif action == "SELL":
         # Use resistance level for stop loss if closer than ATR  
         stop_loss = min(resistance_level * 1.02, current_price + buffer)  # 2% above resistance
-        take_profit_1 = max(support_level * 1.02, current_price - buffer * 1.5)
-        take_profit_2 = max(support_level, current_price - buffer * 2.5)
+        # 🔧 FIXED: Use min() for SELL profit targets to ensure they're below entry
+        take_profit_1 = min(support_level * 1.02, current_price - buffer * 1.5)  # Changed from max() to min()
+        take_profit_2 = min(support_level, current_price - buffer * 2.5)  # This was already correct
+        
     else:
         stop_loss = round(current_price - buffer, 2)
         take_profit_1 = round(current_price + buffer, 2)
@@ -942,6 +945,7 @@ def calculate_risk_levels(df, action, current_price):
         "support_level": support_level,
         "resistance_level": resistance_level
     }
+
 
 def fetch_latest_candle(groww, symbol, interval_minutes=10, max_candles=50):
     """Your original function - unchanged"""
