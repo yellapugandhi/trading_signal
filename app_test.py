@@ -107,7 +107,7 @@ def call_groq_llm(df, groq_key, model_name, symbol):
         from groq import Groq
         
         # Prepare recent candle data
-        recent_data = df.tail(5)
+        recent_data = df.tail(15)
         candles_info = []
         
         for _, row in recent_data.iterrows():
@@ -147,14 +147,14 @@ Your response:"""
         if result in ["BUY", "SELL", "HOLD"]:
             return result
         else:
-            return "HOLD"  # Default to HOLD if unclear response
+            return "UNCLEAR"  
             
     except Exception as e:
         st.warning(f"Groq LLM error: {e}")
         return "UNKNOWN"
 
 def compute_technical_indicators(df):
-    """Add comprehensive technical indicators WITHOUT volume features"""
+    """Add comprehensive technical indicators WITHOUT volume features with dynamic weights and trend strength filter"""
     try:
         df = df.copy()
         
@@ -184,14 +184,91 @@ def compute_technical_indicators(df):
         df['Lag_Close'] = df['close'].shift(1)
         df['Lag_Momentum'] = df['Momentum'].shift(1)
         
-        # **NEW: Simplified Buy_Score WITHOUT Volume**
+        # 🆕 **TREND STRENGTH CALCULATION**
+        # Calculate trend strength as absolute % change of SMA_20 over 5 periods
+        df['Trend_Strength'] = df['SMA_20'].pct_change(5).abs()
+        
+        # 🆕 **DYNAMIC VOLATILITY ANALYSIS**
+        # Compare recent volatility to historical average
+        avg_volatility = df['Volatility'].rolling(30).mean()
+        recent_volatility = df['Volatility'].rolling(10).mean()
+        df['Volatility_Ratio'] = recent_volatility / (avg_volatility + 1e-8)
+        
+        # 🆕 **MARKET REGIME DETECTION**
+        # Identify different market conditions
+        high_vol_threshold = 1.3  # 30% above average volatility
+        trend_threshold = 0.02    # 2% trend strength required
+        
+        high_vol_regime = df['Volatility_Ratio'] > high_vol_threshold
+        trending_market = df['Trend_Strength'] > trend_threshold
+        sideways_market = df['Trend_Strength'] <= 0.01  # Very low trend strength
+        
+        # 🎯 **ADAPTIVE WEIGHT SYSTEM**
+        # Base weights (your proven optimization)
+        base_weights = {
+            'cond1': 0.40,  # RSI oversold + momentum
+            'cond2': 0.20,  # Trend confirmation
+            'cond3': 0.25,  # MACD momentum shift
+            'cond4': 0.15   # Quality filter
+        }
+        
+        # Initialize dynamic weights arrays
+        w1 = np.full(len(df), base_weights['cond1'])
+        w2 = np.full(len(df), base_weights['cond2'])
+        w3 = np.full(len(df), base_weights['cond3'])
+        w4 = np.full(len(df), base_weights['cond4'])
+        
+        # 📈 **HIGH VOLATILITY REGIME ADJUSTMENTS**
+        # In volatile markets: Emphasize momentum, reduce trend following
+        high_vol_mask = high_vol_regime.fillna(False)
+        if high_vol_mask.any():
+            w1[high_vol_mask] = base_weights['cond1'] * 1.15  # More RSI+momentum weight
+            w2[high_vol_mask] = base_weights['cond2'] * 0.80  # Less trend following
+            w3[high_vol_mask] = base_weights['cond3'] * 1.20  # More MACD weight
+            w4[high_vol_mask] = base_weights['cond4'] * 1.10  # Slightly more quality filter
+        
+        # 📊 **SIDEWAYS MARKET ADJUSTMENTS**
+        # In sideways markets: Reduce all weights (fewer signals)
+        sideways_mask = sideways_market.fillna(False)
+        if sideways_mask.any():
+            w1[sideways_mask] = base_weights['cond1'] * 0.70  # Reduce momentum signals
+            w2[sideways_mask] = base_weights['cond2'] * 0.60  # Much less trend following
+            w3[sideways_mask] = base_weights['cond3'] * 0.75  # Reduce MACD sensitivity
+            w4[sideways_mask] = base_weights['cond4'] * 0.90  # Keep quality filter strong
+        
+        # Store dynamic weights for transparency
+        df['Weight_1'] = w1
+        df['Weight_2'] = w2
+        df['Weight_3'] = w3
+        df['Weight_4'] = w4
+        
+        # 🔍 **CONDITION DEFINITIONS** (Your proven logic)
         cond1 = (df["RSI"] < 45) & (df["Momentum"] > 0)
-        cond2 = (df["close"] > df["SMA_10"])  # Removed Volume_Ratio condition
+        cond2 = (df["close"] > df["SMA_10"])
         cond3 = (df["MACD"] > df["MACD_Signal"]) & ((df["MACD"] - df["MACD_Signal"]) > 0)
         cond4 = (df["Momentum"] > df["Momentum"].quantile(0.6)) & (df["RSI"] < 70)
         
-        # Weighted scoring (adjusted weights since we removed volume condition)
-        df['Buy_Score'] = (cond1.astype(int) * 0.4) + (cond2.astype(int) * 0.2) + (cond3.astype(int) * 0.25) + (cond4.astype(int) * 0.15)
+        # 🎯 **ENHANCED BUY SCORE WITH DYNAMIC WEIGHTS**
+        raw_buy_score = (
+            cond1.astype(int) * w1 + 
+            cond2.astype(int) * w2 + 
+            cond3.astype(int) * w3 + 
+            cond4.astype(int) * w4
+        )
+        
+        # 🚫 **TREND STRENGTH FILTER**
+        # Only generate signals in trending markets (>2% trend strength)
+        df['Buy_Score'] = np.where(
+            trending_market.fillna(False), 
+            raw_buy_score,      # Use full score in trending markets
+            raw_buy_score * 0.3 # Reduce score by 70% in non-trending markets
+        )
+        
+        # 📊 **MARKET REGIME INDICATORS** (for display/debugging)
+        df['Market_Regime'] = 'Normal'
+        df.loc[high_vol_regime.fillna(False), 'Market_Regime'] = 'High Volatility'
+        df.loc[sideways_market.fillna(False), 'Market_Regime'] = 'Sideways'
+        df.loc[trending_market.fillna(False) & ~high_vol_regime.fillna(False), 'Market_Regime'] = 'Trending'
         
         # Fill NaN values
         df = df.fillna(method='ffill').fillna(method='bfill')
@@ -201,6 +278,7 @@ def compute_technical_indicators(df):
     except Exception as e:
         st.error(f"Error calculating technical indicators: {e}")
         return df
+
 
 
 def generate_ml_signal(df):
@@ -242,7 +320,7 @@ def generate_ml_signal(df):
             confidence = max(min(confidence + score_boost, 95), 5)
         
         # Determine action
-        if confidence >= 65:
+        if confidence >= 80:
             action = "BUY"
         elif confidence <= 35:
             action = "SELL"
@@ -597,7 +675,7 @@ def display_analysis_results(analysis_data):
     with col4:
         # **NEW: Display Buy_Score**
         current_buy_score = latest.get('Buy_Score', 0)
-        score_color = "🟢" if current_buy_score > 0.6 else ("🟡" if current_buy_score > 0.4 else "🔴")
+        score_color = "🟢" if current_buy_score > 0.8 else ("🟡" if current_buy_score > 0.6 else "🔴")
         st.metric("Buy Score", f"{score_color} {current_buy_score:.2f}")
     
     # Trade Analysis (existing code continues...)
@@ -653,7 +731,7 @@ def display_analysis_results(analysis_data):
     st.dataframe(display_df, use_container_width=True)
 
 # Main App Layout
-st.title("🚀 Enhanced Trading Signal Tool")
+st.title("Trading Signal Tool")
 st.markdown("### ML Model + Groq LLM Analysis with Weighted Buy Score")
 
 # **NEW: Model Information in Sidebar**
