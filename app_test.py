@@ -660,86 +660,72 @@ def generate_ml_signal(df):
             st.info("🔄 Models not loaded. Using enhanced simple signal generation.")
             return simple_signal_generation(df)
         
-        # 🛡️ SAFE feature set - MATCHES anti-overfitting training model
-        safe_features = [
-            # Core safe technical indicators (same as training)
-            "SMA_10", "EMA_10", "RSI", "Momentum", "Volatility",
-            "Lag_Close", "Lag_Momentum", "MACD", "MACD_Signal",
-            # Advanced safe technical indicators (same as training)
-            "BB_Position", "MFI", "Stoch_K", "Williams_R", "CCI", "ADX", 
-            "Volatility_Ratio", "Trend_Strength"
-            # 🛡️ EXCLUDED: "Buy_Score", "Enhanced_Buy_Score", "Market_Regime_Num" (prevent mismatch)
-        ]
-        
-        # Check which features are available in the data
-        available_features = [f for f in safe_features if f in df.columns]
-        core_features = ["SMA_10", "EMA_10", "RSI", "Momentum", "Volatility", "MACD", "MACD_Signal"]
-        core_available = [f for f in core_features if f in df.columns]
-        
-        if len(core_available) < 5:
-            st.warning("⚠️ Insufficient technical indicators. Using enhanced simple signals.")
-            return simple_signal_generation(df)
-        
-        # 🛡️ Use ONLY the safe features that match training
-        try:
-            latest_features = df[available_features].iloc[-1:].fillna(0)
-            
-            # Get ML predictions using anti-overfitting model
-            buy_proba = st.session_state.buy_model.predict_proba(latest_features)[0]
-            rr_prediction = st.session_state.rr_model.predict(latest_features)
-            
-            confidence = buy_proba[1] * 100
-            
-            # 🛡️ Enhanced confidence adjustment WITHOUT leaky features
-            # Use Buy_Score for display only (not for prediction)
-            buy_score = df.get('Buy_Score', pd.Series([0.5])).iloc[-1] if 'Buy_Score' in df.columns else 0.5
-            enhanced_buy_score = df.get('Enhanced_Buy_Score', pd.Series([0.5])).iloc[-1] if 'Enhanced_Buy_Score' in df.columns else 0.5
-            
-            # 🛡️ Pattern-based confidence adjustment (safe)
-            pattern_boost = 0
-            pattern_columns = [col for col in df.columns if col.startswith('Pattern_')]
-            if pattern_columns:
-                latest_patterns = df[pattern_columns].iloc[-1]
-                bullish_patterns = ['Pattern_hammer', 'Pattern_bullish_engulfing']
-                bearish_patterns = ['Pattern_shooting_star']
-                
-                for pattern in bullish_patterns:
-                    if pattern in latest_patterns.index and latest_patterns[pattern]:
-                        pattern_boost += 3  # Reduced boost
-                
-                for pattern in bearish_patterns:
-                    if pattern in latest_patterns.index and latest_patterns[pattern]:
-                        pattern_boost -= 3  # Reduced penalty
-            
-            confidence = max(min(confidence + pattern_boost, 85), 15)  # More conservative range
-            
-            # Determine action with realistic thresholds
-            if confidence >= 75:  # Stricter threshold
-                action = "BUY"
-            elif confidence <= 35:  # Stricter threshold
-                action = "SELL"
+        # 🛡️ Ensure Market_Regime_Num exists (this was missing!)
+        if 'Market_Regime_Num' not in df.columns:
+            # Create Market_Regime_Num from Market_Regime
+            if 'Market_Regime' in df.columns:
+                regime_mapping = {'Normal': 0, 'High_Volatility': 1, 'Sideways': 2, 'Trending': 3}
+                df['Market_Regime_Num'] = df['Market_Regime'].map(regime_mapping).fillna(0)
             else:
-                action = "HOLD"
-            
-            return {
-                'action': action,
-                'confidence': confidence,
-                'buy_probability': buy_proba[1],
-                'predicted_rr': max(rr_prediction[0], 0.01),
-                'method': f'🛡️ Anti-Overfitting ML Model ({len(available_features)} safe features)',
-                'buy_score': buy_score,  # For display only
-                'enhanced_buy_score': enhanced_buy_score,  # For display only
-                'pattern_boost': pattern_boost
-            }
-            
-        except Exception as pred_error:
-            st.error(f"🛡️ Model prediction error: {str(pred_error)}")
-            st.info("🔄 Falling back to enhanced simple signals...")
+                # Create basic regime classification
+                if 'Volatility_Ratio' in df.columns and 'Trend_Strength' in df.columns:
+                    high_vol = df['Volatility_Ratio'] > 1.3
+                    trending = df['Trend_Strength'] > 0.02
+                    sideways = df['Trend_Strength'] <= 0.01
+                    
+                    regime_num = 0  # Normal
+                    regime_num = np.where(high_vol, 1, regime_num)  # High_Volatility
+                    regime_num = np.where(sideways, 2, regime_num)  # Sideways
+                    regime_num = np.where(trending & ~high_vol, 3, regime_num)  # Trending
+                    
+                    df['Market_Regime_Num'] = regime_num
+                else:
+                    df['Market_Regime_Num'] = 0  # Default to Normal
+        
+        # 🛡️ Get expected features from the trained model
+        expected_features = st.session_state.buy_model.feature_names_in_
+        
+        # 🛡️ Reorder and select only the features the model expects
+        available_features = [f for f in expected_features if f in df.columns]
+        
+        if len(available_features) < len(expected_features):
+            missing_features = set(expected_features) - set(available_features)
+            st.warning(f"⚠️ Missing features: {missing_features}. Using fallback.")
             return simple_signal_generation(df)
+        
+        # 🛡️ Create input DataFrame with exact feature order from training
+        latest_features = df[expected_features].iloc[-1:].fillna(0)
+        
+        # Get ML predictions
+        buy_proba = st.session_state.buy_model.predict_proba(latest_features)
+        rr_prediction = st.session_state.rr_model.predict(latest_features)
+        
+        confidence = buy_proba[1] * 100
+        confidence = max(min(confidence, 85), 15)  # Conservative range
+        
+        # Determine action with realistic thresholds
+        if confidence >= 75:
+            action = "BUY"
+        elif confidence <= 35:
+            action = "SELL"
+        else:
+            action = "HOLD"
+        
+        return {
+            'action': action,
+            'confidence': confidence,
+            'buy_probability': buy_proba[1],
+            'predicted_rr': max(rr_prediction, 0.01),
+            'method': f'🛡️ Anti-Overfitting ML Model ({len(expected_features)} features)',
+            'buy_score': df.get('Buy_Score', pd.Series([0.5])).iloc[-1] if 'Buy_Score' in df.columns else 0.5,
+            'enhanced_buy_score': df.get('Enhanced_Buy_Score', pd.Series([0.5])).iloc[-1] if 'Enhanced_Buy_Score' in df.columns else 0.5,
+            'pattern_boost': 0
+        }
         
     except Exception as e:
         st.warning(f"🛡️ Enhanced ML model error: {e}. Using enhanced simple signals.")
         return simple_signal_generation(df)
+
 
 def simple_signal_generation(df):
     """🆕 Enhanced fallback signal generation with advanced features"""
