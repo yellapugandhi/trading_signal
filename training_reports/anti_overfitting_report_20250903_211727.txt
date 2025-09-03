@@ -1,6 +1,6 @@
 ANTI-OVERFITTING TRADING MODEL TRAINING REPORT
 ===============================================
-Timestamp: 2025-09-03 20:44:27.778848
+Timestamp: 2025-09-03 21:17:27.980893
 Symbol: NIFTY
 Data points: 1743
 Date range: 2024-09-09 00:00:00+05:30 to 2025-09-03 15:15:00+05:30
