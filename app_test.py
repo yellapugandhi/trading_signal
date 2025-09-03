@@ -899,7 +899,7 @@ def calculate_position_size(current_price, stop_loss, account_balance, risk_per_
         return 0
 
 def calculate_risk_levels(df, action, current_price, target_rr=1.5):
-    """🆕 Enhanced risk level calculation with controlled risk:reward ratio"""
+    """🆕 COMPLETELY FIXED: Enhanced risk level calculation with proper profit target logic"""
     latest = df.iloc[-1]
     atr = df['Volatility'].iloc[-1] if 'Volatility' in df.columns else 1.0
     atr = max(atr, 1.0)
@@ -910,38 +910,46 @@ def calculate_risk_levels(df, action, current_price, target_rr=1.5):
     resistance_level = latest.get('Resistance_Level', current_price + buffer)
 
     if action == "BUY":
-        # Use support level for stop loss if closer than ATR
+        # BUY: Stop loss below, profits above
         stop_loss = max(support_level * 0.98, current_price - buffer)
-        # Calculate max allowable profit based on target risk:reward
         price_risk = abs(current_price - stop_loss)
         max_profit = price_risk * target_rr
         
-        # Constrain profit targets to max_profit distance
         take_profit_1 = min(current_price + max_profit * 0.6, resistance_level * 0.98)
         take_profit_2 = min(current_price + max_profit, resistance_level)
         
     elif action == "SELL":
-        # Use resistance level for stop loss if closer than ATR  
+        # SELL: Stop loss above, profits below
         stop_loss = min(resistance_level * 1.02, current_price + buffer)
-        # Calculate max allowable profit based on target risk:reward
         price_risk = abs(stop_loss - current_price)
         max_profit = price_risk * target_rr
         
-        # Constrain profit targets to max_profit distance
+        # 🔧 FIXED: Ensure both TPs are below current price for SELL
         take_profit_1 = max(current_price - max_profit * 0.6, support_level * 1.02)
         take_profit_2 = max(current_price - max_profit, support_level)
         
     else:
+        # HOLD: Neutral setup
         stop_loss = round(current_price - buffer, 2)
-        take_profit_1 = round(current_price + buffer, 2)
-        take_profit_2 = round(current_price + buffer * 2, 2)
+        take_profit_1 = round(current_price + buffer * 0.5, 2)
+        take_profit_2 = round(current_price + buffer, 2)
+
+    # 🔧 CRITICAL FIX: Ensure profit target order is correct
+    if action == "SELL":
+        # For SELL: TP1 should be closer (higher price), TP2 further (lower price)
+        if take_profit_1 < take_profit_2:
+            take_profit_1, take_profit_2 = take_profit_2, take_profit_1
+    elif action == "BUY":  
+        # For BUY: TP1 should be closer (lower price), TP2 further (higher price)
+        if take_profit_1 > take_profit_2:
+            take_profit_1, take_profit_2 = take_profit_2, take_profit_1
 
     # Round values
     stop_loss = round(stop_loss, 2)
     take_profit_1 = round(take_profit_1, 2) 
     take_profit_2 = round(take_profit_2, 2)
     
-    # Recalculate final risk:reward with constrained targets
+    # Calculate final risk:reward
     price_risk = abs(current_price - stop_loss)
     price_reward = abs(take_profit_2 - current_price)
     risk_reward_ratio = round(price_reward / price_risk, 2) if price_risk > 0 else 1.0
