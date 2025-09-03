@@ -511,7 +511,7 @@ def fetch_latest_candle(groww, symbol, interval_minutes=10, max_candles=50):
             interval_in_minutes=interval_minutes
         )
         
-        if not data or 'candles' not in 
+        if not data or 'candles' not in data:
             return None
         
         candles = data.get('candles', [])
