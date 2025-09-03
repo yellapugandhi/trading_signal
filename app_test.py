@@ -59,42 +59,61 @@ def load_models_safely():
         return False, f"Error loading models: {str(e)}"
 
 def initialize_groww_safely():
-    """Initialize Groww API safely"""
+    """Initialize Groww API safely with recursion prevention"""
     try:
+        # Prevent multiple initializations
+        if hasattr(st.session_state, 'groww_initialized') and st.session_state.groww_initialized:
+            if hasattr(st.session_state, 'groww_api') and st.session_state.groww_api:
+                return st.session_state.groww_api, st.session_state.instruments_df, "Groww API already initialized"
+        
         from growwapi import GrowwAPI
         grow_key = st.session_state.get("grow_api_key", "")
         
         if not grow_key:
             return None, None, "Please enter your Groww API token"
         
-        groww = GrowwAPI(grow_key)
-        
+        # 🔧 FIXED: Simple initialization without complex recursion
         try:
-            instruments_df = pd.read_csv("instruments.csv")
-            groww.instruments = instruments_df
-            groww._load_instruments = lambda: None
-            groww._download_and_load_instruments = lambda: instruments_df
+            groww = GrowwAPI(grow_key)
             
+            # Load instruments
+            instruments_df = pd.read_csv("instruments.csv")
+            
+            # Store in session state to prevent re-initialization
+            st.session_state.groww_api = groww
+            st.session_state.instruments_df = instruments_df
+            st.session_state.groww_initialized = True
+            
+            # Simple instrument lookup function
             def get_instrument_by_symbol(symbol):
-                matching_instruments = instruments_df[instruments_df['groww_symbol'] == symbol]
-                if not matching_instruments.empty:
-                    return matching_instruments.iloc[0].to_dict()
-                else:
-                    st.error(f"Symbol {symbol} not found in instruments")
+                try:
+                    matching_instruments = instruments_df[instruments_df['groww_symbol'] == symbol]
+                    if not matching_instruments.empty:
+                        return matching_instruments.iloc.to_dict()
+                    else:
+                        st.error(f"Symbol {symbol} not found in instruments")
+                        return None
+                except Exception as e:
+                    st.error(f"Error finding symbol {symbol}: {e}")
                     return None
             
+            # Assign the function without complex method overriding
             groww.get_instrument_by_groww_symbol = get_instrument_by_symbol
+            
             return groww, instruments_df, "Groww API initialized successfully"
             
         except FileNotFoundError:
             return None, None, "instruments.csv file not found"
         except Exception as e:
-            return None, None, f"Error loading instruments: {str(e)}"
+            return None, None, f"Error initializing Groww API: {str(e)}"
             
     except ImportError:
         return None, None, "GrowwAPI not installed. Please install: pip install groww-api"
+    except RecursionError:
+        return None, None, "Recursion error in Groww API. Try restarting the app."
     except Exception as e:
-        return None, None, f"Error initializing Groww API: {str(e)}"
+        return None, None, f"Unexpected error initializing Groww API: {str(e)}"
+
 
 def get_groq_models(groq_key):
     """Return single preferred Groq model"""
