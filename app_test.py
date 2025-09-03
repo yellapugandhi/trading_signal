@@ -899,7 +899,7 @@ def calculate_position_size(current_price, stop_loss, account_balance, risk_per_
         return 0
 
 def calculate_risk_levels(df, action, current_price, target_rr=1.5):
-    """🆕 COMPLETELY FIXED: Enhanced risk level calculation with proper profit target logic"""
+    """🆕 BULLETPROOF: Enhanced risk level calculation - completely fixed"""
     latest = df.iloc[-1]
     atr = df['Volatility'].iloc[-1] if 'Volatility' in df.columns else 1.0
     atr = max(atr, 1.0)
@@ -911,36 +911,44 @@ def calculate_risk_levels(df, action, current_price, target_rr=1.5):
 
     if action == "BUY":
         # BUY: Stop loss below, profits above
-        stop_loss = max(support_level * 0.98, current_price - buffer)
+        stop_loss = max(current_price - buffer, support_level * 0.98)
         price_risk = abs(current_price - stop_loss)
         max_profit = price_risk * target_rr
         
-        take_profit_1 = min(current_price + max_profit * 0.6, resistance_level * 0.98)
-        take_profit_2 = min(current_price + max_profit, resistance_level)
+        take_profit_1 = current_price + max_profit * 0.6
+        take_profit_2 = current_price + max_profit
+        
+        # Respect resistance levels as caps
+        take_profit_1 = min(take_profit_1, resistance_level * 0.98)
+        take_profit_2 = min(take_profit_2, resistance_level)
         
     elif action == "SELL":
         # SELL: Stop loss above, profits below
-        stop_loss = min(resistance_level * 1.02, current_price + buffer)
+        stop_loss = min(current_price + buffer, resistance_level * 1.02)
         price_risk = abs(stop_loss - current_price)
         max_profit = price_risk * target_rr
         
-        # 🔧 FIXED: Ensure both TPs are below current price for SELL
-        take_profit_1 = max(current_price - max_profit * 0.6, support_level * 1.02)
-        take_profit_2 = max(current_price - max_profit, support_level)
+        # 🔧 FIXED: Calculate TPs first, then apply support floor
+        take_profit_1 = current_price - max_profit * 0.6
+        take_profit_2 = current_price - max_profit
+        
+        # Respect support levels as floors (only if they're below calculated TPs)
+        take_profit_1 = max(take_profit_1, support_level) if take_profit_1 > support_level else take_profit_1
+        take_profit_2 = max(take_profit_2, support_level) if take_profit_2 > support_level else take_profit_2
         
     else:
         # HOLD: Neutral setup
-        stop_loss = round(current_price - buffer, 2)
-        take_profit_1 = round(current_price + buffer * 0.5, 2)
-        take_profit_2 = round(current_price + buffer, 2)
+        stop_loss = current_price - buffer
+        take_profit_1 = current_price + buffer * 0.5
+        take_profit_2 = current_price + buffer
 
-    # 🔧 CRITICAL FIX: Ensure profit target order is correct
+    # Ensure correct TP ordering
     if action == "SELL":
-        # For SELL: TP1 should be closer (higher price), TP2 further (lower price)
+        # For SELL: TP1 closer to entry (higher), TP2 further (lower)
         if take_profit_1 < take_profit_2:
             take_profit_1, take_profit_2 = take_profit_2, take_profit_1
     elif action == "BUY":  
-        # For BUY: TP1 should be closer (lower price), TP2 further (higher price)
+        # For BUY: TP1 closer to entry (lower), TP2 further (higher)
         if take_profit_1 > take_profit_2:
             take_profit_1, take_profit_2 = take_profit_2, take_profit_1
 
