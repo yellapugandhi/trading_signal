@@ -696,11 +696,17 @@ def generate_ml_signal(df):
         # 🛡️ Create input DataFrame with exact feature order from training
         latest_features = df[expected_features].iloc[-1:].fillna(0)
         
-        # Get ML predictions
-        buy_proba = st.session_state.buy_model.predict_proba(latest_features)
-        rr_prediction = st.session_state.rr_model.predict(latest_features)
+        # 🔧 FIXED: Safe ML predictions with proper array handling
+        buy_proba = st.session_state.buy_model.predict_proba(latest_features)[0]  # Get first row
+        rr_prediction = st.session_state.rr_model.predict(latest_features)[0]     # Get first element
         
-        confidence = buy_proba[1] * 100
+        # 🔧 FIXED: Safe confidence calculation
+        if len(buy_proba) > 1:
+            confidence = buy_proba[1] * 100  # Use positive class probability
+        else:
+            # Handle single class case (rare but possible)
+            confidence = buy_proba[0] * 100 if buy_proba[0] > 0.5 else (1 - buy_proba[0]) * 100
+        
         confidence = max(min(confidence, 85), 15)  # Conservative range
         
         # Determine action with realistic thresholds
@@ -714,7 +720,7 @@ def generate_ml_signal(df):
         return {
             'action': action,
             'confidence': confidence,
-            'buy_probability': buy_proba[1],
+            'buy_probability': buy_proba[1] if len(buy_proba) > 1 else buy_proba[0],
             'predicted_rr': max(rr_prediction, 0.01),
             'method': f'🛡️ Anti-Overfitting ML Model ({len(expected_features)} features)',
             'buy_score': df.get('Buy_Score', pd.Series([0.5])).iloc[-1] if 'Buy_Score' in df.columns else 0.5,
@@ -1012,21 +1018,21 @@ def fetch_latest_candle(groww, symbol, interval_minutes=10, max_candles=50):
 def perform_complete_analysis(groww, selected_symbol, interval_minutes, groq_key, selected_groq_model, account_balance, risk_per_trade, groq_available):
     """🆕 ENHANCED analysis with anti-overfitting compatibility"""
     try:
-        # Your original data fetching (unchanged)
+        # Fetch data
         df = fetch_latest_candle(groww, selected_symbol, interval_minutes, 100)
         
         if df is None or len(df) < 20:
             return None, "Failed to fetch sufficient data"
         
-        # Your original ML signal generation (now fixed for anti-overfitting)
+        # Generate ML signal
         ml_signal = generate_ml_signal(df)
         
-        # Your original Groq signal generation (enhanced)
+        # Generate Groq signal
         groq_signal = "UNKNOWN"
         if groq_available:
             groq_signal = call_groq_llm(df, groq_key, selected_groq_model, selected_symbol)
         
-        # Your original signal combination (enhanced)
+        # Combine signals
         if groq_signal != "UNKNOWN":
             final_signal = combine_ml_and_groq_signals(ml_signal, groq_signal)
         else:
@@ -1034,55 +1040,21 @@ def perform_complete_analysis(groww, selected_symbol, interval_minutes, groq_key
             final_signal['groq_signal'] = "Not Available"
             final_signal['consensus'] = "ML Only"
         
-        # Your original risk calculations (enhanced)
+        # Calculate risk levels
         current_price = df['close'].iloc[-1]
         risk_levels = calculate_risk_levels(df, final_signal['action'], current_price)
         quantity = calculate_position_size(current_price, risk_levels['stop_loss'], account_balance, risk_per_trade)
         
-        # 🆕 ADD ALL ADVANCED ANALYSIS FEATURES
-        
-        # Feature 9-12: Advanced Market Analysis
+        # Get additional analysis
         patterns = detect_candlestick_patterns(df)
         sentiment = analyze_market_sentiment(selected_symbol)
         options_data = analyze_options_flow(selected_symbol)
         market_regime = detect_market_regime(df)
         support_resistance = find_support_resistance_levels(df)
-        
-        # Feature 13-16: Performance & Analytics
         performance_metrics = calculate_performance_metrics()
         
-        # 🆕 Log this trade for performance tracking
-        trade_data = {
-            'timestamp': datetime.now(),
-            'symbol': selected_symbol,
-            'action': final_signal['action'],
-            'confidence': final_signal['confidence'],
-            'price': current_price,
-            'enhanced_buy_score': final_signal.get('enhanced_buy_score', 0),
-            # Will be updated when position is closed
-            'pnl': 0,
-            'status': 'open'
-        }
-        
-        if len(st.session_state.performance_tracker) >= 100:  # Keep last 100 trades
-            st.session_state.performance_tracker.pop(0)
-        st.session_state.performance_tracker.append(trade_data)
-        
-        # 🆕 Portfolio management update
-        if selected_symbol not in st.session_state.portfolio:
-            st.session_state.portfolio[selected_symbol] = {
-                'position': 0,
-                'avg_price': 0,
-                'last_signal': final_signal['action'],
-                'last_update': datetime.now()
-            }
-        else:
-            st.session_state.portfolio[selected_symbol]['last_signal'] = final_signal['action']
-            st.session_state.portfolio[selected_symbol]['last_update'] = datetime.now()
-        
-        # 🆕 ENHANCED analysis data with ALL features
+        # Assemble complete analysis
         analysis_data = {
-            # Your original data (unchanged)
             'df': df,
             'ml_signal': ml_signal,
             'groq_signal': groq_signal,
@@ -1092,22 +1064,19 @@ def perform_complete_analysis(groww, selected_symbol, interval_minutes, groq_key
             'quantity': quantity,
             'timestamp': datetime.now(),
             'symbol': selected_symbol,
-            
-            # 🆕 ALL 16 ADVANCED FEATURES ADDED
             'patterns': patterns,
             'sentiment_analysis': sentiment,
             'options_flow': options_data,
             'market_regime': market_regime,
             'support_resistance': support_resistance,
-            'performance_metrics': performance_metrics,
-            'trade_log': trade_data,
-            'portfolio_status': st.session_state.portfolio[selected_symbol]
+            'performance_metrics': performance_metrics
         }
         
         return analysis_data, "✅ Enhanced analysis completed with anti-overfitting model!"
         
     except Exception as e:
         return None, f"Enhanced analysis failed: {str(e)}"
+
 
 def display_analysis_results(analysis_data):
     """🆕 Enhanced display with anti-overfitting awareness"""
