@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import datetime as dt_module
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import warnings
 import traceback
@@ -10,10 +10,6 @@ import os
 import time
 import requests
 import json
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import smtplib
-import plotly.graph_objects as go
 
 warnings.filterwarnings("ignore")
 
@@ -42,6 +38,7 @@ if 'models_loaded' not in st.session_state:
 # ======================= MODEL LOADING =======================
 @st.cache_data(ttl=300)
 def load_models_safely():
+    """Safely load models with error handling"""
     try:
         if os.path.exists("models/buy_model_latest.pkl") and os.path.exists("models/rr_model_latest.pkl"):
             buy_model = joblib.load("models/buy_model_latest.pkl")
@@ -93,106 +90,6 @@ def initialize_groww_safely(grow_key):
     except Exception as e:
         return None, None, f"Error initializing Groww API: {str(e)}"
 
-# ---------------- Fetch OI Data Function ----------------
-
-# 🔹 Format expiry safely for matching instrument file
-def format_expiry(expiry, available_expiries):
-    try:
-        expiry = expiry.strip().upper()
-
-        for e in available_expiries:
-            if expiry in e.upper():
-                return e
-
-        if len(expiry) == 5 and expiry[:2].isdigit():
-            day = expiry[:2]
-            mon = expiry[2:].capitalize()
-            year = str(pd.Timestamp.now().year % 100)
-            return f"{day}{mon}{year}"
-
-        return pd.to_datetime(expiry).strftime("%d%b%y")
-    except Exception as e:
-        raise ValueError(f"Invalid expiry format: {expiry}") from e
-
-
-# 🔹 Retry wrapper for Groww API
-def safe_get_quote(groww, symbols, segment, exchange, retries=3, delay=2):
-    results = []
-    for symbol in symbols:
-        if not symbol or not isinstance(symbol, str):
-            st.warning(f"Skipping invalid trading symbol: {symbol}")
-            continue
-        for attempt in range(retries):
-            response = groww.get_quote(segment=segment, trading_symbol=symbol, exchange=exchange)
-            if response.get("status") == "SUCCESS":
-                results.append(response)
-                break
-            time.sleep(delay)
-        else:
-            results.append({"status": "FAILURE", "message": f"Max retries exceeded for {symbol}"})
-    return results
-
-# 🔹 Fetch OI changes for CE/PE options
-def fetch_option_chain_oi(groww, instruments_df, symbol, expiry, strikes, segment="FNO", exchange="NSE"):
-    # Filter matching instruments similarly as before to get trading symbols:
-    ce_symbols = []
-    pe_symbols = []
-
-    for strike in strikes:
-        ce_row = instruments_df[
-            (instruments_df['underlying_symbol'] == symbol) &
-            (instruments_df['expiry_date'] == pd.to_datetime(expiry, format="%d%b%y")) &
-            (instruments_df['strike_price'] == strike) &
-            (instruments_df['instrument_type'] == "CE") &
-            (instruments_df['segment'] == segment) &
-            (instruments_df['exchange'] == exchange)
-        ]
-        pe_row = instruments_df[
-            (instruments_df['underlying_symbol'] == symbol) &
-            (instruments_df['expiry_date'] == pd.to_datetime(expiry, format="%d%b%y")) &
-            (instruments_df['strike_price'] == strike) &
-            (instruments_df['instrument_type'] == "PE") &
-            (instruments_df['segment'] == segment) &
-            (instruments_df['exchange'] == exchange)
-        ]
-
-        if not ce_row.empty:
-            ce_symbols.append(ce_row.iloc[0]['trading_symbol'])
-        if not pe_row.empty:
-            pe_symbols.append(pe_row.iloc[0]['trading_symbol'])
-
-    all_symbols = ce_symbols + pe_symbols
-    
-    # Call safe_get_quote with all symbols
-    all_quotes = safe_get_quote(groww, all_symbols, segment, exchange)
-
-    # Map from trading_symbol to quote
-    quotes_dict = {q.get("data", {}).get("trading_symbol", ""): q for q in all_quotes if q.get("status") == "SUCCESS"}
-
-    rows = []
-    for strike in strikes:
-        ce_sym = next((s for s in ce_symbols if str(strike) in s), None)
-        pe_sym = next((s for s in pe_symbols if str(strike) in s), None)
-
-        ce_oi = 0
-        pe_oi = 0
-
-        if ce_sym and ce_sym in quotes_dict:
-            ce_oi = quotes_dict[ce_sym].get("data", {}).get("openInterest", 0)
-        if pe_sym and pe_sym in quotes_dict:
-            pe_oi = quotes_dict[pe_sym].get("data", {}).get("openInterest", 0)
-
-        rows.append({
-            "strike": strike,
-            "CE_OI": ce_oi,
-            "PE_OI": pe_oi
-        })
-
-    return pd.DataFrame(rows)
-
-
-
-#######################
 def fetch_latest_candle(groww, symbol, interval_minutes=10, max_candles=50):
     """Fetch latest candle data from Groww API"""
     try:
@@ -201,12 +98,12 @@ def fetch_latest_candle(groww, symbol, interval_minutes=10, max_candles=50):
             return None
         
         ist = ZoneInfo("Asia/Kolkata")
-        now = dt_module.datetime.now(ist)
+        now = datetime.now(ist)
         
         # Handle weekends
         if now.weekday() >= 5:
             days_back = now.weekday() - 4
-            now = now - dt_module.timedelta(days=days_back)
+            now = now - timedelta(days=days_back)
         
         # Set appropriate end time
         market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
@@ -226,7 +123,7 @@ def fetch_latest_candle(groww, symbol, interval_minutes=10, max_candles=50):
         days_needed = max((max_candles * interval_minutes) / (24 * 60), 5)
         days_needed = min(days_needed, max_days)
         
-        start_time = end_time - dt_module.timedelta(days=days_needed)
+        start_time = end_time - timedelta(days=days_needed)
         
         # API call
         data = groww.get_historical_candle_data(
@@ -346,7 +243,6 @@ End with: SIGNAL: [BUY/SELL/HOLD]"""
     except Exception as e:
         st.warning(f"Groq LLM error: {e}")
         return {'signal': 'UNKNOWN', 'analysis': f'Error: {str(e)}', 'method': 'Error'}
-
 
 # ======================= 1. PRICE ACTION FEATURES =======================
 def detect_hammer(df):
@@ -939,143 +835,95 @@ def simple_signal_generation(df):
 
 # ======================= 4. INDIVIDUAL INDICATORS ANALYSIS =======================
 def analyze_individual_indicators(df):
-    """
-    Returns:
-      - signals_table: List[dict] for DataFrame/table
-      - summary: dict with total_score, max_score, bias, action
-    """
-    latest = df.iloc[-1]
-    signals_table = []
-
-    FACTORS = [
-        {
-            "label": "MACD",
-            "weight": "Medium",
-            "func": lambda: (
-                "BUY" if latest["MACD"] > latest["MACD_Signal"] else "SELL",
-                4 if latest["MACD"] > latest["MACD_Signal"] else 2,
-                "Medium",
-                "Momentum building" if latest["MACD"] > latest["MACD_Signal"] else "Momentum fading"
-            )
-        },
-        {
-            "label": "SMA",
-            "weight": "Medium",
-            "func": lambda: (
-                "BUY" if latest["close"] > latest["SMA_10"] else "SELL",
-                4 if latest["close"] > latest["SMA_10"] else 2,
-                "Medium",
-                "Price above average" if latest["close"] > latest["SMA_10"] else "Price below SMA10"
-            )
-        },
-        {
-            "label": "Stochastic",
-            "weight": "High",
-            "func": lambda: (
-                "SELL" if latest["Stoch_K"] > 80 else "BUY" if latest["Stoch_K"] < 20 else "HOLD",
-                2,
-                "High",
-                "Overbought zone" if latest["Stoch_K"] > 80 else "Oversold" if latest["Stoch_K"] < 20 else "Neutral"
-            )
-        },
-        {
-            "label": "Williams %R",
-            "weight": "High",
-            "func": lambda: (
-                "SELL" if latest["Williams_R"] > -20 else "BUY" if latest["Williams_R"] < -80 else "HOLD",
-                2,
-                "High",
-                "Overbought" if latest["Williams_R"] > -20 else "Oversold" if latest["Williams_R"] < -80 else "Neutral"
-            )
-        },
-        {
-            "label": "CCI",
-            "weight": "Medium",
-            "func": lambda: (
-                "SELL" if latest["CCI"] > 100 else "BUY" if latest["CCI"] < -100 else "HOLD",
-                2,
-                "Medium",
-                "Possible reversal" if abs(latest["CCI"]) > 100 else "Neutral"
-            )
-        },
-        {
-            "label": "ADX",
-            "weight": "High",
-            "func": lambda: (
-                "Strong Trend" if latest["ADX"] > 25 else "Weak Trend",
-                2 if latest["ADX"] > 25 else 1,
-                "High",
-                "ADX>25 (trend building)" if latest["ADX"] > 25 else "No strong bias"
-            )
-        },
-        {
-            "label": "Bollinger",
-            "weight": "Medium",
-            "func": lambda: (
-                "SELL" if latest["BB_Position"] > 0.8 else "BUY" if latest["BB_Position"] < 0.2 else "HOLD",
-                2,
-                "Medium",
-                "Overextended" if latest["BB_Position"] > 0.8 else "Oversold" if latest["BB_Position"] < 0.2 else "Neutral"
-            )
-        },
-        {
-            "label": "MFI",
-            "weight": "Medium",
-            "func": lambda: (
-                "SELL" if latest["MFI"] > 70 else "BUY" if latest["MFI"] < 30 else "HOLD",
-                2,
-                "Medium",
-                "Overbought" if latest["MFI"] > 70 else "Oversold" if latest["MFI"] < 30 else "Neutral"
-            )
+    """Analyze each indicator's individual signal"""
+    try:
+        latest = df.iloc[-1]
+        signals = {}
+        
+        # RSI
+        rsi_val = latest.get('RSI', 50)
+        if rsi_val < 30:
+            signals['RSI'] = {'signal': 'BUY', 'value': rsi_val, 'strength': 'Strong'}
+        elif rsi_val > 70:
+            signals['RSI'] = {'signal': 'SELL', 'value': rsi_val, 'strength': 'Strong'}
+        else:
+            signals['RSI'] = {'signal': 'HOLD', 'value': rsi_val, 'strength': 'Neutral'}
+        
+        # MACD
+        macd = latest.get('MACD', 0)
+        macd_signal = latest.get('MACD_Signal', 0)
+        signals['MACD'] = {
+            'signal': 'BUY' if macd > macd_signal else 'SELL',
+            'value': f"{macd:.3f}",
+            'strength': 'Moderate'
         }
-    ]
-
-    total_score = 0
-    max_score = 0
-
-    for f in FACTORS:
-        try:
-            sig, score, _, notes = f["func"]()
-            weight_num = 2 if f["weight"] == "High" else 1
-            weighted_score = score * weight_num
-            signals_table.append({
-                "Factor": f["label"],
-                "Signal": sig,
-                "Weight": f["weight"],
-                "Score": score,
-                "WeightedScore": weighted_score,
-                "Notes": notes
-            })
-            total_score += weighted_score
-            max_score += 5 * weight_num
-        except Exception as e:
-            signals_table.append({
-                "Factor": f["label"], "Signal": "?", "Weight": f["weight"], "Score": "?", "WeightedScore": 0, "Notes": str(e)
-            })
-            max_score += 5 * (2 if f["weight"] == "High" else 1)
-
-    # Bias/summary logic
-    if total_score >= max_score * 0.8:
-        bias = "Bullish (strong conviction)"
-        action = "Aggressive: Enter or scale in quickly"
-    elif total_score >= max_score * 0.65:
-        bias = "Cautious Bullish"
-        action = "Enter with risk control / partial size"
-    elif total_score >= max_score * 0.5:
-        bias = "Neutral"
-        action = "Wait for confirmation or stand aside"
-    else:
-        bias = "No action Zone"
-        action = "NO action"
-
-    summary = {
-        "total_score": total_score,
-        "max_score": max_score,
-        "bias": bias,
-        "action": action
-    }
-    return signals_table, summary
-
+        
+        # Moving Averages
+        close = latest.get('close', 0)
+        sma_10 = latest.get('SMA_10', close)
+        signals['SMA'] = {
+            'signal': 'BUY' if close > sma_10 else 'SELL',
+            'value': f"{close/sma_10:.3f}",
+            'strength': 'Moderate'
+        }
+        
+        # Stochastic
+        stoch_k = latest.get('Stoch_K', 50)
+        if stoch_k < 20:
+            signals['Stochastic'] = {'signal': 'BUY', 'value': stoch_k, 'strength': 'Strong'}
+        elif stoch_k > 80:
+            signals['Stochastic'] = {'signal': 'SELL', 'value': stoch_k, 'strength': 'Strong'}
+        else:
+            signals['Stochastic'] = {'signal': 'HOLD', 'value': stoch_k, 'strength': 'Neutral'}
+        
+        # Bollinger Bands
+        bb_pos = latest.get('BB_Position', 0.5)
+        if bb_pos < 0.2:
+            signals['Bollinger'] = {'signal': 'BUY', 'value': bb_pos, 'strength': 'Moderate'}
+        elif bb_pos > 0.8:
+            signals['Bollinger'] = {'signal': 'SELL', 'value': bb_pos, 'strength': 'Moderate'}
+        else:
+            signals['Bollinger'] = {'signal': 'HOLD', 'value': bb_pos, 'strength': 'Neutral'}
+        
+        # Williams %R
+        williams_r = latest.get('Williams_R', -50)
+        if williams_r < -80:
+            signals['Williams_R'] = {'signal': 'BUY', 'value': williams_r, 'strength': 'Strong'}
+        elif williams_r > -20:
+            signals['Williams_R'] = {'signal': 'SELL', 'value': williams_r, 'strength': 'Strong'}
+        else:
+            signals['Williams_R'] = {'signal': 'HOLD', 'value': williams_r, 'strength': 'Neutral'}
+        
+        # Money Flow Index
+        mfi = latest.get('MFI', 50)
+        if mfi < 30:
+            signals['MFI'] = {'signal': 'BUY', 'value': mfi, 'strength': 'Strong'}
+        elif mfi > 70:
+            signals['MFI'] = {'signal': 'SELL', 'value': mfi, 'strength': 'Strong'}
+        else:
+            signals['MFI'] = {'signal': 'HOLD', 'value': mfi, 'strength': 'Neutral'}
+        
+        # CCI
+        cci = latest.get('CCI', 0)
+        if cci < -100:
+            signals['CCI'] = {'signal': 'BUY', 'value': cci, 'strength': 'Strong'}
+        elif cci > 100:
+            signals['CCI'] = {'signal': 'SELL', 'value': cci, 'strength': 'Strong'}
+        else:
+            signals['CCI'] = {'signal': 'HOLD', 'value': cci, 'strength': 'Neutral'}
+        
+        # ADX
+        adx = latest.get('ADX', 25)
+        signals['ADX'] = {
+            'signal': 'Strong Trend' if adx > 25 else 'Weak Trend',
+            'value': adx,
+            'strength': 'High' if adx > 40 else 'Medium' if adx > 25 else 'Low'
+        }
+        
+        return signals
+        
+    except Exception as e:
+        return {'error': f'Indicator analysis failed: {str(e)}'}
 
 # ======================= 5. SUPPORT & RESISTANCE MULTI-TIMEFRAME =======================
 def calculate_support_resistance_multiTF(df):
@@ -1306,12 +1154,35 @@ def display_groq_section(groq_data):
         st.warning("⚠️ Groq analysis not available")
         st.write(groq_data['analysis'])
 
-def display_indicators_section(signals, summary):
-    st.header("4. All Indicators: Multi-factor Table & Score")
-    st.markdown(f"**🧠 Score (out of {summary['max_score']}):** {summary['total_score']:.0f}")
-    st.markdown(f"**Bias:** {summary['bias']}")
-    st.markdown(f"**Action:** {summary['action']}")
-    st.dataframe(pd.DataFrame(signals))
+def display_indicators_section(indicators):
+    """Display 4. All Indicators"""
+    st.header("4. 📊 All Indicators")
+    
+    if 'error' in indicators:
+        st.error(indicators['error'])
+        return
+    
+    st.markdown("**Individual Indicator Signals:**")
+    
+    # Create grid layout
+    cols = st.columns(4)
+    col_idx = 0
+    
+    for indicator, data in indicators.items():
+        with cols[col_idx % 4]:
+            signal_color = "#22a218" if data['signal'] == "BUY" else ("#d32f2f" if data['signal'] == "SELL" else "#f39c12")
+            signal_emoji = "🟢" if data['signal'] == "BUY" else ("🔴" if data['signal'] == "SELL" else "🟡")
+            
+            st.markdown(f"**{indicator}**")
+            st.markdown(f"{signal_emoji} **{data['signal']}**")
+            if isinstance(data['value'], (int, float)):
+                st.write(f"Value: {data['value']:.2f}")
+            else:
+                st.write(f"Value: {data['value']}")
+            st.write(f"Strength: {data['strength']}")
+            st.markdown("---")
+        
+        col_idx += 1
 
 
 def display_support_resistance_section(sr_data):
@@ -1391,302 +1262,156 @@ def display_entry_stop_loss_section(analysis_data):
             st.write(f"**Risk Amount:** ₹{risk_amount:.2f}")
             st.write(f"**Reward Amount:** ₹{reward_amount:.2f}")
 
-def strong_price_structure_override(df):
-    """
-    Check if the last few candles confirm a strong bullish structure:
-    - Higher lows and higher highs over last 4 candles
-    - Price closing above recent resistance level
-    """
-    if len(df) < 10:
-        return False
-    
-    recent = df.tail(6)
-    highs = recent['high']
-    lows = recent['low']
-    closes = recent['close']
-    resistance = recent['Resistance_Level'].iloc[-1]
-    
-    # Check for higher lows and higher highs
-    hl = all(lows.iloc[i] > lows.iloc[i-1] for i in range(1, len(lows)))
-    hh = all(highs.iloc[i] > highs.iloc[i-1] for i in range(1, len(highs)))
-    
-    # Check last close above resistance
-    close_above_resistance = closes.iloc[-1] > resistance
-    
-    return hl and hh and close_above_resistance
-
-# ------------------- NEW FEATURES START --------------------
-
-# 1. Real-time Email Alert Demo (Replace with actual credentials and SMTP config)
-def send_email_alert(subject, body, recipient_email):
-    sender_email = "youremail@example.com"
-    sender_password = "yourpassword"  # Use environment vars / secrets in prod
-
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = recipient_email
-    msg['Subject'] = subject
-
-    msg.attach(MIMEText(body, 'plain'))
-
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)  # Using Gmail SMTP as example
-        server.starttls()
-        server.login(sender_email, sender_password)
-        server.send_message(msg)
-        server.quit()
-        return True
-    except Exception as e:
-        st.error(f"Email alert failed: {e}")
-        return False
-
-# 2. Simple Backtesting Logic for a strategy (dummy example)
-def backtest_strategy(df, entry_col='Buy_Score', threshold=0.7):
-    df = df.copy()
-    df['Position'] = 0
-    df.loc[df[entry_col] > threshold, 'Position'] = 1
-    df['Returns'] = df['close'].pct_change()
-    df['Strategy_Returns'] = df['Returns'] * df['Position'].shift(1).fillna(0)
-    df['Cumulative_Returns'] = (1 + df['Strategy_Returns']).cumprod()
-    return df
-
-# 3. Interactive Candlestick chart with overlays using Plotly
-def plot_candlestick_with_indicators(df):
-    fig = go.Figure(data=[go.Candlestick(
-        x=df['timestamp'],
-        open=df['open'],
-        high=df['high'],
-        low=df['low'],
-        close=df['close'],
-        name='Price'
-    )])
-
-    # Add moving averages
-    if 'SMA_10' in df.columns:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['SMA_10'], mode='lines', name='SMA 10'))
-    if 'SMA_20' in df.columns:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['SMA_20'], mode='lines', name='SMA 20'))
-
-    # Add Bollinger Bands
-    if 'BB_Upper' in df.columns and 'BB_Lower' in df.columns:
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['BB_Upper'], mode='lines', line=dict(color='rgba(255,0,0,0.2)'), showlegend=True, name='BB Upper'))
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['BB_Lower'], mode='lines', line=dict(color='rgba(0,255,0,0.2)'), showlegend=True, name='BB Lower'))
-
-    fig.update_layout(title='Candlestick Chart with Indicators', xaxis_rangeslider_visible=False)
-    st.plotly_chart(fig, use_container_width=True)
-
-# 4. Sentiment Analysis placeholder (modify with real API later)
-def fetch_sentiment_score(symbol):
-    # Dummy stub: returns random sentiment between -1 and 1
-    return np.random.uniform(-1, 1)
-
-# 5. Basic Portfolio Tracking in session state
-def update_portfolio(position, price, qty):
-    portfolio = st.session_state.get('portfolio', {})
-    if position == 'buy':
-        portfolio['qty'] = portfolio.get('qty', 0) + qty
-        portfolio['avg_price'] = ((portfolio.get('avg_price', 0) * portfolio.get('qty', 0)) + price * qty) / (portfolio.get('qty', 0) + qty)
-    elif position == 'sell':
-        portfolio['qty'] = max(portfolio.get('qty', 0) - qty, 0)
-    st.session_state['portfolio'] = portfolio
-
-def display_portfolio():
-    portfolio = st.session_state.get('portfolio', {})
-    st.write("### Portfolio Summary:")
-    st.write(portfolio)
-
-# 6. Model Explainability placeholder (needs actual SHAP or similar)
-def show_model_explanation():
-    st.write("### Model Feature Importance (Example)")
-    st.bar_chart({
-        'Feature': ['Momentum', 'RSI', 'MACD', 'Volume', 'Volatility'],
-        'Importance': [0.3, 0.25, 0.2, 0.15, 0.1]
-    })
-
-# 7. Multi-symbol Watchlist management
-def add_symbol_to_watchlist(symbol):
-    if 'watchlist' not in st.session_state:
-        st.session_state['watchlist'] = []
-    if symbol not in st.session_state['watchlist']:
-        st.session_state['watchlist'].append(symbol)
-
-def display_watchlist():
-    watchlist = st.session_state.get('watchlist', [])
-    st.sidebar.write("### Watchlist")
-    for sym in watchlist:
-        st.sidebar.write(sym)
-
-# 8. Parameter tuning panel by user input
-def parameter_tuning():
-    st.sidebar.write("### Tuning Parameters")
-    period_rsi = st.sidebar.slider("RSI Period", 5, 50, 14)
-    period_sma = st.sidebar.slider("SMA Period", 5, 50, 20)
-    return period_rsi, period_sma
-
-# 9. Dynamic risk management adjustment
-def adjust_risk_based_on_volatility(df, base_risk=0.01):
-    vol = df['Volatility'].iloc[-1] if 'Volatility' in df.columns else 1.0
-    adjusted_risk = base_risk * (vol / df['Volatility'].mean())
-    return max(min(adjusted_risk, 0.05), 0.005)  # cap risk between 0.5% to 5%
-
-# 10. Loading spinner during computations
-from contextlib import contextmanager
-@contextmanager
-def spinner(message):
-    with st.spinner(message):
-        yield
-
-# ------------------- NEW FEATURES END -----------------------
-
-# ======================= MAIN DASHBOARD =======================
-# --- START: Beautification and UI Enhancements below ---
-
-# Custom CSS for headers and color
-st.markdown("""
-<style>
-/* Colorful metrics and section headers */
-.big-header {
-    font-size: 2.7rem !important;
-    color: #1C2833 !important;
-    font-weight: 800;
-    letter-spacing: 0.03em;
-    margin-bottom: 6px;
-}
-.section-title {
-    font-size: 1.6rem !important;
-    color: #2874A6 !important;
-    font-weight: 700;
-    margin-top: 22px;
-    margin-bottom: 4px;
-}
-.metric-value, .stMetric {
-    font-weight: bold !important;
-    font-size: 2.1rem !important;
-}
-.st-bw, .stButton>button {
-    border-radius: 8px;
-    background: linear-gradient(90deg,#E8DAEF, #D4EFDF,#F9E79F);
-    color: #222 !important;
-    font-size: 1.21rem !important;
-}
-.st-emotion-cache-0 {  /* Reduce sidebar padding, more content fits */
-    padding-top: 1rem !important;
-}
-.stDataFrame {background: #FDFEFE !important;}
-.stExpanderHeader {font-size:1.13rem !important; color:#CB4335;}
-/* Tab headers more visible */
-.stTabs [data-baseweb="tab"] {
-    background-color: #E8F8F5 !important;
-    color: #007474 !important;
-    font-weight: bold !important;
-    border-radius: 12px 12px 0 0;
-    font-size: 1.0rem;
-    padding: 4px 26px 4px 26px;
-}
-.stTabs [aria-selected="true"] {
-    background: #F9E79F !important;
-    color: #B03A2E !important;
-}
-</style>
-""", unsafe_allow_html=True)
-# --- END: Beautification and UI Enhancements above ---
-
 # ======================= MAIN DASHBOARD =======================
 def main_dashboard():
+    """Main dashboard with your exact order"""
     st.title("🎯 Enhanced Price Action Trading System")
-    st.markdown("Complete Multi-Strategy Analysis Dashboard (Live Groww API)")
-
+    st.markdown("### Complete Multi-Strategy Analysis Dashboard (Live Groww API)")
+    
+    # Sidebar configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
+        
+        # API Keys - FIXED: No direct session_state assignment
+        st.subheader("🔐 API Keys")
         grow_api_key = st.text_input("Groww API Key", type="password", key="grow_api_key")
         groq_key = st.text_input("Groq API Key", type="password", key="groq_key")
+        
+        # Account Settings
+        st.subheader("💰 Account Settings")
         account_balance = st.number_input("Account Balance (₹)", min_value=10000, value=100000, step=10000)
         risk_per_trade = st.slider("Risk per Trade (%)", min_value=0.5, max_value=5.0, value=1.5, step=0.1)
+        
+        # Symbol and Timeframe
+        st.subheader("📊 Trading Setup")
         symbol = st.selectbox("Select Symbol", ["NSE-NIFTY", "NSE-BANKNIFTY", "NSE-RELIANCE", "NSE-TCS", "NSE-INFY", "NSE-HDFC"], index=0)
-        interval_minutes = st.selectbox("Candle Interval", [1,5,10,15,30,60], index=0)
+        interval_minutes = st.selectbox("Candle Interval", [1,5,10, 15, 30, 60], index=0)
+        
+        # Analysis buttons
+        st.subheader("📈 Actions")
         analyze_btn = st.button("🎯 Complete Analysis", type="primary", use_container_width=True)
-        if st.button("🔄 Refresh", use_container_width=True):
+        
+        if st.button("🔄 Refresh Data", use_container_width=True):
             st.cache_data.clear()
-            st.experimental_rerun()
-
-    # Initialize APIs & models
-    if 'groww' not in st.session_state:
-        st.session_state.groww = None
-    if grow_api_key and (not st.session_state.groww):
-        groww, instruments_df, msg = initialize_groww_safely(grow_api_key)
-        st.session_state.groww = groww
-        if groww:
-            st.success(msg)
+            st.rerun()
+    
+    # Load Models
+    if not st.session_state.models_loaded:
+        models_loaded, model_msg = load_models_safely()
+        if models_loaded:
+            st.success(model_msg)
         else:
-            st.warning(msg)
-
-    models_loaded, model_msg = load_models_safely()
-    if not models_loaded:
-        st.warning(model_msg)
+            st.warning(model_msg)
+    
+    # Initialize Groww API
+    groww, instruments_df, groww_msg = initialize_groww_safely(grow_api_key)
+    if groww is None:
+        st.warning(f"Groww API: {groww_msg}")
     else:
-        st.success(model_msg)
-
-    # Run analysis on button click
-    if analyze_btn and st.session_state.groww:
-        groww = st.session_state.groww
-        try:
-            df = fetch_latest_candle(groww, symbol, interval_minutes, 100)
-            if df is None or len(df) < 20:
-                st.error("Insufficient candle data")
-                return
-            current_price = df['close'].iloc[-1]
-
-            pa_analysis = analyze_price_action(df)
-            ml_analysis = generate_ml_signal(df)
-            groq_analysis = None
-            if groq_key:
-                groq_analysis = call_groq_llm(df, groq_key, "llama-3.3-70versatile", symbol)
-            else:
-                groq_analysis = {"signal":"No Groq Key", "analysis":"", "method":""}
-            signals, summary = analyze_individual_indicators(df)
-            sr_levels = calculate_support_resistance_multiTF(df)
-            risk_levels = calculate_risk_levels(df, ml_analysis['action'], current_price)
-            quantity = calculate_position_size(current_price, risk_levels['stop_loss'], account_balance, risk_per_trade)
-
-            st.session_state.analysis_data = {
-                'df': df,
-                'pa_analysis': pa_analysis,
-                'ml_analysis': ml_analysis,
-                'groq_analysis': groq_analysis,
-                'signals': signals,
-                'summary': summary,
-                'sr_levels': sr_levels,
-                'risk_levels': risk_levels,
-                'current_price': current_price,
-                'quantity': quantity,
-                'timestamp': dt_module.datetime.now(),
-                'symbol': symbol
-            }
-
-            st.success(f"Analysis completed successfully for {symbol}.")
-
-        except Exception as e:
-            st.error(f"Analysis error: {e}")
-            traceback.print_exc()
-
-    # Display results & OI table
+        st.success(groww_msg)
+    
+    # Main analysis
+    if analyze_btn and groww is not None:
+        with st.spinner("🔍 Performing complete analysis with live Groww data..."):
+            
+            try:
+                # Fetch live data from Groww API
+                df = fetch_latest_candle(groww, symbol, interval_minutes, 100)
+                
+                if df is None or len(df) < 20:
+                    st.error("Failed to fetch sufficient data from Groww API")
+                    return
+                
+                current_price = df['close'].iloc[-1]
+                
+                # 1. Price Action Analysis
+                pa_analysis = analyze_price_action(df)
+                
+                # 2. ML Analysis  
+                ml_analysis = generate_ml_signal(df)
+                
+                # 3. Groq Analysis
+                groq_analysis = call_groq_llm(df, groq_key, "llama-3.3-70b-versatile", symbol)
+                
+                # 4. Individual Indicators
+                indicators = analyze_individual_indicators(df)
+                
+                # 5. Support & Resistance
+                sr_levels = calculate_support_resistance_multiTF(df)
+                
+                # 6. Risk Analysis
+                risk_levels = calculate_risk_levels(df, ml_analysis['action'], current_price)
+                quantity = calculate_position_size(current_price, risk_levels['stop_loss'], account_balance, risk_per_trade)
+                
+                # Store analysis data
+                st.session_state.analysis_data = {
+                    'df': df,
+                    'pa_analysis': pa_analysis,
+                    'ml_analysis': ml_analysis,
+                    'groq_analysis': groq_analysis,
+                    'indicators': indicators,
+                    'sr_levels': sr_levels,
+                    'risk_levels': risk_levels,
+                    'current_price': current_price,
+                    'quantity': quantity,
+                    'timestamp': datetime.now(),
+                    'symbol': symbol
+                }
+                
+                st.success(f"✅ Analysis completed for {symbol} using live Groww data!")
+                
+            except Exception as e:
+                st.error(f"Analysis failed: {str(e)}")
+    
+    # Display results in your requested order
     if st.session_state.get('analysis_data'):
         data = st.session_state.analysis_data
-
-        st.info(f"Last updated: {data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} for {data['symbol']}")
-
-        display_price_action_section(data['pa_analysis']); st.markdown("---")
-        display_ml_section(data['ml_analysis']); st.markdown("---")
-        display_groq_section(data['groq_analysis']); st.markdown("---")
-        display_indicators_section(data['signals'], data['summary']); st.markdown("---")
-        display_support_resistance_section(data['sr_levels']); st.markdown("---")
-        display_entry_stop_loss_section(data); st.markdown("---")
-
+        
+        # Display timestamp
+        st.info(f"📅 Last updated: {data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} for {data['symbol']}")
+        
+        # YOUR EXACT REQUESTED ORDER:
+        
+        # 1. Price Action Strategy
+        display_price_action_section(data['pa_analysis'])
+        st.markdown("---")
+        
+        # 2. ML Model Strategy
+        display_ml_section(data['ml_analysis'])
+        st.markdown("---")
+        
+        # 3. Groq Model
+        display_groq_section(data['groq_analysis'])
+        st.markdown("---")
+        
+        # 4. All Indicators
+        display_indicators_section(data['indicators'])
+        st.markdown("---")
+        
+        # 5. Support and Resistance - 1 day, 4hrs value
+        display_support_resistance_section(data['sr_levels'])
+        st.markdown("---")
+        
+        # 6. Entry level and stop loss
+        display_entry_stop_loss_section(data)
+        
+        # Additional Market Data Summary
+        st.markdown("---")
+        st.subheader("📊 Market Data Summary")
+        
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Price", f"₹{data['current_price']:.2f}")
-        col2.metric("RSI", f"{data['df']['RSI'].iloc[-1]:.1f}")
-        col3.metric("MACD", f"{data['df']['MACD'].iloc[-1]:.3f}")
-        col4.metric("Volume", f"{data['df']['volume'].iloc[-1]:,}")
+        
+        with col1:
+            st.metric("Current Price", f"₹{data['current_price']:.2f}")
+            
+        with col2:
+            st.metric("RSI", f"{data['df']['RSI'].iloc[-1]:.1f}")
+            
+        with col3:
+            st.metric("MACD", f"{data['df']['MACD'].iloc[-1]:.3f}")
+            
+        with col4:
+            st.metric("Volume", f"{data['df']['volume'].iloc[-1]:,.0f}")
 
 if __name__ == "__main__":
     main_dashboard()

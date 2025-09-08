@@ -160,7 +160,7 @@ def create_master_dataframe(dfs):
     
     return df_master
 
-def save_data_to_csv(dfs, symbol="NIFTY"):
+def save_data_to_csv(dfs, symbol="NSE-NIFTY"):
     """Save collected data to CSV files"""
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
