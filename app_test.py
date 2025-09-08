@@ -1593,8 +1593,8 @@ st.markdown("""
 
 # ======================= MAIN DASHBOARD =======================
 def main_dashboard():
-    st.title("🎯 Enhanced Price Action Trading System")
-    st.markdown("Complete Multi-Strategy Analysis Dashboard (Live Groww API)")
+    st.title("🎯 Trading System")
+    st.markdown("created by Gandhi Yellapu")
 
     with st.sidebar:
         st.header("⚙️ Configuration")
@@ -1640,7 +1640,7 @@ def main_dashboard():
             ml_analysis = generate_ml_signal(df)
             groq_analysis = None
             if groq_key:
-                groq_analysis = call_groq_llm(df, groq_key, "llama-3.3-70versatile", symbol)
+                groq_analysis = call_groq_llm(df, groq_key, "llama-3.3-70b-versatile", symbol)
             else:
                 groq_analysis = {"signal":"No Groq Key", "analysis":"", "method":""}
             signals, summary = analyze_individual_indicators(df)
