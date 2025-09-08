@@ -18,7 +18,7 @@ import plotly.graph_objects as go
 warnings.filterwarnings("ignore")
 
 st.set_page_config(
-    page_title="🎯 Advanced Price Action Trading System",
+    page_title="🎯 Advanced Trading System",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
