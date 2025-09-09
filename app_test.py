@@ -43,9 +43,9 @@ if 'models_loaded' not in st.session_state:
 @st.cache_data(ttl=300)
 def load_models_safely():
     try:
-        if os.path.exists("models/buy_model_latest.pkl") and os.path.exists("models/rr_model_latest.pkl"):
-            buy_model = joblib.load("models/buy_model_latest.pkl")
-            rr_model = joblib.load("models/rr_model_latest.pkl")
+        if os.path.exists("models/buy_model.pkl") and os.path.exists("models/rr_model.pkl"):
+            buy_model = joblib.load("models/buy_model.pkl")
+            rr_model = joblib.load("models/rr_model_.pkl")
             st.session_state.buy_model = buy_model
             st.session_state.rr_model = rr_model
             st.session_state.models_loaded = True
