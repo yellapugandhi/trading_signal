@@ -1629,6 +1629,7 @@ def main_dashboard():
     #Trading strategy
     with st.expander("📖 Trading strategy"):
          st.markdown("""
+    *STEP - 1*
     1. check put to call ratio - high put call ratio indicates bearish sentiment, low indicates bullish sentiment. (weak signal)
     2. check open interest - rising open interest with rising prices indicates bullish sentiment, rising open interest with falling prices indicates bearish sentiment. (weak signal)
     3. check volume - rising volume with rising prices indicates bullish sentiment, rising volume with falling prices indicates bearish sentiment. (weak signal)
@@ -1637,6 +1638,8 @@ def main_dashboard():
     6. Check for highest and nearest OI (to decide buy or put)           
     7. See variations in OI during trades, if buy side OI increases chances of reversal and vice versa. If both buy and put side OI increases, high chances of sideways and avoid trading.
     8. High IV means high premium, low IV means low premium. Avoid buying options at high IV. (weak signal)
+                     
+    *STEP - 2*                 
     9. Risk management: risk only 1-2% of capital per trade.
     10. Use stop loss and target profit levels to manage trades.
     11. Dont predict the market, react to the market. Once your target is hit, book profits and move on.
@@ -1646,6 +1649,8 @@ def main_dashboard():
     15. Avoid trading during first 15 minutes and last 15 minutes of market hours.   
     16. Avoid trading during high volatility periods (like budget day, election results etc)
     17. Maket doesnt always follow technicals, be ready to take losses and move on.  
+                     
+    *STEP - 3*                    
     18. ML model gives signal based on historical data, use it as a reference only. Dont blindly follow the model.
     19. Groq LLM gives signal based on current market data, use it as a reference only. Dont blindly follow the model.
     20. Indicators give signal based on technical analysis, use it as a reference only. Dont blindly follow the indicators.                          
