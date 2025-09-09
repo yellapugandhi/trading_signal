@@ -108,8 +108,8 @@ def load_data(symbol="NIFTY", days_back=360):
     
     # Define data collection periods (label, days_ago_start, days_ago_end, interval_minutes)
     periods = [
-        ("df_live", 0, 30, 10),      # Recent data with 10-min candles
-        ("df_1", 30, 60, 15),        # Month ago with 15-min candles
+        ("df_live", 0, 15, 5),      # Recent data with 10-min candles
+        ("df_1", 15, 45, 10),        # Month ago with 15-min candles
         ("df_2", 60, 90, 30),        # 2 months ago with 30-min candles
         ("df_3", 90, 180, 1440),     # 3-6 months ago with daily candles
         ("df_4", 180, min(360, days_back), 1440),  # Older data with daily candles
