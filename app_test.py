@@ -1626,6 +1626,31 @@ def main_dashboard():
     else:
         st.success(model_msg)
 
+    #Trading strategy
+    with st.expander("📖 Trading strategy"):
+         st.markdown("""
+    1. check put to call ratio - high put call ratio indicates bearish sentiment, low indicates bullish sentiment. (weak signal)
+    2. check open interest - rising open interest with rising prices indicates bullish sentiment, rising open interest with falling prices indicates bearish sentiment. (weak signal)
+    3. check volume - rising volume with rising prices indicates bullish sentiment, rising volume with falling prices indicates bearish sentiment. (weak signal)
+    4. Dont buy strike prices which are multiples of 50 (like 28550 or 24850 etc)
+    5. Dont buy at strike price 
+    6. Check for highest and nearest OI (to decide buy or put)           
+    7. See variations in OI during trades, if buy side OI increases chances of reversal and vice versa. If both buy and put side OI increases, high chances of sideways and avoid trading.
+    8. High IV means high premium, low IV means low premium. Avoid buying options at high IV. (weak signal)
+    9. Risk management: risk only 1-2% of capital per trade.
+    10. Use stop loss and target profit levels to manage trades.
+    11. Dont predict the market, react to the market. Once your target is hit, book profits and move on.
+    12. Avoid trading during high impact news events.         
+    13. Avoid trading during market open and close hours, trade during mid hours. (dont trade between 9:15-9:45 and 14:45-15:30)
+    14. Avoid trading during expiry day (Dont do intraday trading on expiry day)
+    15. Avoid trading during first 15 minutes and last 15 minutes of market hours.   
+    16. Avoid trading during high volatility periods (like budget day, election results etc)
+    17. Maket doesnt always follow technicals, be ready to take losses and move on.  
+    18. ML model gives signal based on historical data, use it as a reference only. Dont blindly follow the model.
+    19. Groq LLM gives signal based on current market data, use it as a reference only. Dont blindly follow the model.
+    20. Indicators give signal based on technical analysis, use it as a reference only. Dont blindly follow the indicators.                          
+    """)
+
     # Run analysis on button click
     if analyze_btn and st.session_state.groww:
         groww = st.session_state.groww
