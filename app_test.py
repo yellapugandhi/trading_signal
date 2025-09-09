@@ -45,7 +45,7 @@ def load_models_safely():
     try:
         if os.path.exists("models/buy_model.pkl") and os.path.exists("models/rr_model.pkl"):
             buy_model = joblib.load("models/buy_model.pkl")
-            rr_model = joblib.load("models/rr_model_.pkl")
+            rr_model = joblib.load("models/rr_model.pkl")
             st.session_state.buy_model = buy_model
             st.session_state.rr_model = rr_model
             st.session_state.models_loaded = True
