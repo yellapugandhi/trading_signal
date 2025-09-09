@@ -1595,7 +1595,7 @@ st.markdown("""
 def main_dashboard():
     st.title("🎯 Trading System")
     st.markdown("created by Gandhi Yellapu")
-    st.markdown("FIrst study Trading strategy logic")
+    st.markdown("First study Trading strategy logic")
 
     with st.sidebar:
         st.header("⚙️ Configuration")
